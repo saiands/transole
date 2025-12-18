@@ -1,0 +1,96 @@
+{% extends 'clientdoc/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="container py-4">
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'clientdoc:dashboard' %}">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'clientdoc:item_list' %}">Items</a></li>
+            <li class="breadcrumb-item active" aria-current="page">{{ item.name }}</li>
+        </ol>
+    </nav>
+
+    <!-- Item Header -->
+    <div class="row align-items-center mb-4">
+        <div class="col-md-8">
+            <h2 class="fw-bold mb-1">{{ item.name }}</h2>
+            <p class="text-muted mb-0">SKU: {{ item.article_code|default:"-" }} | {{
+                item.category.name|default:"Uncategorized" }}</p>
+        </div>
+        <div class="col-md-4 text-md-end">
+            <a href="{% url 'clientdoc:edit_item' item.id %}" class="btn btn-primary px-4"><i
+                    class="bi bi-pencil-square me-2"></i>Edit Item</a>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="row g-4">
+        <div class="col-md-8">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-transparent py-3">
+                    <h5 class="mb-0 fw-bold">Inventory & Pricing Details</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-sm-6">
+                            <label class="text-uppercase text-secondary small fw-bold">Base Price</label>
+                            <div class="fs-4 fw-bold text-dark">₹ {{ item.price }}</div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="text-uppercase text-secondary small fw-bold">GST Rate</label>
+                            <div class="fs-4 fw-bold text-dark">{{ item.gst_rate }} <span
+                                    class="fs-6 fw-normal text-muted">(x 100%)</span></div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="text-uppercase text-secondary small fw-bold">HSN/SAC Code</label>
+                            <div class="fs-5 text-dark">{{ item.hsn_sac|default:"-" }}</div>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="text-uppercase text-secondary small fw-bold">Unit</label>
+                            <div class="fs-5 text-dark">{{ item.unit|default:"Nos" }}</div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4 text-muted opacity-25">
+
+                    <div class="mb-3">
+                        <label class="text-uppercase text-secondary small fw-bold mb-2">Description</label>
+                        <p class="text-muted">{{ item.description|default:"No description available."|linebreaks }}</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-transparent py-3">
+                    <h5 class="mb-0 fw-bold">Product Image</h5>
+                </div>
+                <div class="card-body text-center p-4">
+                    {% if item.image %}
+                    <img src="{{ item.image.url }}" class="img-fluid rounded border" alt="{{ item.name }}"
+                        style="max-height: 250px;">
+                    {% else %}
+                    <div class="p-5 bg-light rounded text-muted">
+                        <i class="bi bi-image fs-1 d-block mb-3"></i>
+                        <span class="small">No image uploaded</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card shadow-sm border-0 border-danger-subtle">
+                <div class="card-body">
+                    <h6 class="text-danger fw-bold"><i class="bi bi-exclamation-triangle me-2"></i>Danger Zone</h6>
+                    <p class="small text-muted mb-3">Deleting this item will move it to the trash.</p>
+                    <a href="{% url 'clientdoc:delete_object' 'item' item.id %}"
+                        class="btn btn-outline-danger btn-sm w-100"
+                        onclick="return confirm('Are you sure you want to delete this item?');">Delete Item</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

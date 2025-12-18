@@ -1,0 +1,221 @@
+{% extends 'clientdoc/base.html' %}
+{% load crispy_forms_tags %}
+{% block title %}{{ title }}{% endblock %}
+{% block main_title %}{{ title }}{% endblock %}
+
+{% block content %}
+{% include 'clientdoc/includes/workflow_steps.html' %}
+
+<div class="row">
+    <!-- Left Col: File Management (Uploads) -->
+    <div class="col-lg-7">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white py-3">
+                <h5 class="mb-0 text-primary">1. Manage Uploads & Images</h5>
+            </div>
+            <div class="card-body">
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+
+                    <h6 class="border-bottom pb-2 mb-3 text-muted">Supporting Documents</h6>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Purchase Order (PO) Copy:</label>
+                        {% if has_po %}
+                        <div class="alert alert-success d-flex justify-content-between align-items-center p-2">
+                            <span><i class="fas fa-check-circle me-2"></i> {{
+                                confirmation.po_file.name|cut:'confirmation_docs/po/' }}</span>
+                            <button type="submit" name="delete_po" class="btn btn-outline-danger btn-sm border-0"
+                                onclick="return confirm('Delete PO file?')">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        {% else %}
+                        {{ form.po_file|as_crispy_field }}
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Approval Email PDF:</label>
+                        {% if has_email %}
+                        <div class="alert alert-success d-flex justify-content-between align-items-center p-2">
+                            <span><i class="fas fa-check-circle me-2"></i> {{
+                                confirmation.approval_email_file.name|cut:'confirmation_docs/email/' }}</span>
+                            <button type="submit" name="delete_email" class="btn btn-outline-danger btn-sm border-0"
+                                onclick="return confirm('Delete Approval Email file?')">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        {% else %}
+                        {{ form.approval_email_file|as_crispy_field }}
+                        {% endif %}
+                    </div>
+
+                    <h6 class="border-bottom pb-2 mb-3 mt-4 text-muted">Packed Images</h6>
+
+                    {{ image_formset.management_form }}
+                    <div id="image-form-list">
+                        {% for form in image_formset %}
+                        <div class="p-3 mb-3 border rounded bg-light image-form-row position-relative">
+                            <div class="row">
+                                <div class="col-md-5">{{ form.image|as_crispy_field }}</div>
+                                <div class="col-md-7">{{ form.notes|as_crispy_field }}</div>
+                            </div>
+                            {% if form.instance.pk %}
+                            <div class="mt-1 d-flex gap-2">
+                                <a href="{{ form.instance.image.url }}" target="_blank"
+                                    class="text-decoration-none text-info small">View</a>
+                                <a href="{% url 'clientdoc:delete_packed_image' form.instance.id %}"
+                                    class="text-decoration-none text-danger small"
+                                    onclick="return confirm('Delete image?')">Delete</a>
+                            </div>
+                            {% endif %}
+                            {{ form.DELETE }}
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        <button type="button" id="add-image-btn" class="btn btn-sm btn-outline-primary rounded-pill">
+                            <i class="fas fa-plus me-1"></i> Add Image
+                        </button>
+                    </div>
+
+                    <!-- Hidden Empty Template -->
+                    <div id="empty-form" style="display:none;">
+                        <div class="p-3 mb-3 border rounded bg-light image-form-row">
+                            <div class="row">
+                                <div class="col-md-5">{{ image_formset.empty_form.image|as_crispy_field }}</div>
+                                <div class="col-md-7">{{ image_formset.empty_form.notes|as_crispy_field }}</div>
+                            </div>
+                            <button type="button"
+                                class="btn btn-sm btn-link text-danger remove-form-btn p-0">Remove</button>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-3 border-top">
+                        <button type="submit" name="save_notes" class="btn btn-primary w-100">Save Uploads &
+                            Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Col: Ordering & Finalize -->
+    <div class="col-lg-5">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-dark text-white py-3">
+                <h5 class="mb-0">2. Finalize Document Bundle</h5>
+            </div>
+            <div class="card-body d-flex flex-column">
+                <p class="text-muted small mb-3">Drag and drop the items below to set the order of the final PDF.</p>
+
+                <form action="{% url 'clientdoc:finalize_invoice_pdf' invoice.id %}" method="post" id="finalize-form">
+                    {% csrf_token %}
+                    <ul class="list-group mb-4" id="files-list">
+                        {% for file in available_files %}
+                        <li class="list-group-item d-flex align-items-center justify-content-between p-3"
+                            data-id="{{ file.id }}">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-grip-lines text-muted me-3" style="cursor: grab;"></i>
+                                <div>
+                                    <h6 class="mb-0">{{ file.name }}</h6>
+                                </div>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input file-toggle" type="checkbox" checked
+                                    style="cursor: pointer;" {% if file.required %}disabled{% endif %}>
+                            </div>
+                        </li>
+                        {% endfor %}
+
+                        <!-- Static Packed Images Entry (Always at end usually) -->
+                        <li class="list-group-item d-flex align-items-center justify-content-between p-3 bg-light">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-lock text-muted me-3"></i>
+                                <div>
+                                    <h6 class="mb-0">Packed Images Pages</h6>
+                                    <small class="text-muted">Always appended at the end</small>
+                                </div>
+                            </div>
+                            <i class="fas fa-check text-success"></i>
+                        </li>
+                    </ul>
+
+                    <input type="hidden" name="file_order" id="file_order_input">
+
+                    <div class="mt-auto">
+                        <button type="submit" class="btn btn-success btn-lg w-100 py-3 shadow">
+                            <i class="fas fa-file-pdf me-2"></i> Generate Final PDF
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- SortableJS -->
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Image Formset Logic (Same as before)
+        const addBtn = document.getElementById('add-image-btn');
+        const formList = document.getElementById('image-form-list');
+        const emptyFormTemplate = document.getElementById('empty-form').innerHTML;
+        const totalFormsInput = document.getElementById('id_packedimage_set-TOTAL_FORMS');
+        const maxForms = 15;
+
+        if (addBtn) {
+            addBtn.addEventListener('click', function () {
+                const currentForms = document.querySelectorAll('.image-form-row').length;
+                if (currentForms >= maxForms) {
+                    alert("Limit reached.");
+                    return;
+                }
+                const newFormIdx = parseInt(totalFormsInput.value);
+                const newFormHtml = emptyFormTemplate.replace(/__prefix__/g, newFormIdx);
+                const newDiv = document.createElement('div');
+                newDiv.innerHTML = newFormHtml;
+                formList.appendChild(newDiv.firstElementChild);
+                totalFormsInput.value = newFormIdx + 1;
+            });
+        }
+
+        formList.addEventListener('click', function (e) {
+            if (e.target.classList.contains('remove-form-btn')) {
+                e.target.closest('.image-form-row').remove();
+            }
+        });
+
+        // Sortable Logic
+        const el = document.getElementById('files-list');
+        const sortable = Sortable.create(el, {
+            animation: 150,
+            handle: '.fa-grip-lines',
+            ghostClass: 'bg-light'
+        });
+
+        // Form Submit Logic
+        document.getElementById('finalize-form').addEventListener('submit', function (e) {
+            // Get all list items from Sortable
+            const allItems = Array.from(el.children);
+            const order = [];
+
+            allItems.forEach(li => {
+                // If it's a data-id row
+                if (li.dataset.id) {
+                    const checkbox = li.querySelector('.file-toggle');
+                    // Include if checked
+                    if (checkbox && checkbox.checked) {
+                        order.push(li.dataset.id);
+                    }
+                }
+            });
+
+            document.getElementById('file_order_input').value = order.join(',');
+        });
+    });
+</script>
+{% endblock %}

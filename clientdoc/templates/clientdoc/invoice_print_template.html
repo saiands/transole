@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Tax Invoice #{{ display_invoice_number }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 10mm;
+        }
+
+        body {
+            font-family: Helvetica, Arial, sans-serif;
+            font-size: 9pt;
+            margin: 0;
+            padding: 0;
+            color: #000;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border-spacing: 0;
+        }
+
+        th,
+        td {
+            border: 1px solid #000;
+            padding: 4px;
+            vertical-align: top;
+        }
+
+        .no-border {
+            border: none !important;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .text-end {
+            text-align: right;
+        }
+
+        .text-bold {
+            font-weight: bold;
+        }
+
+        .title {
+            text-align: center;
+            font-size: 14pt;
+            font-weight: bold;
+            margin-bottom: 5mm;
+        }
+
+        .inner-table td,
+        .inner-table th {
+            border: 1px solid #000;
+        }
+
+        .inner-table {
+            width: 100%;
+            margin: 0;
+        }
+
+        .item-table th {
+            background-color: #f0f0f0;
+            text-align: center;
+        }
+
+        .tax-table th {
+            text-align: center;
+        }
+
+        .footer-table td {
+            width: 50%;
+        }
+
+        .signature-box {
+            height: 40px;
+            text-align: right;
+        }
+
+        .signature-img {
+            max-height: 40px;
+            max-width: 120px;
+        }
+
+        .small-text {
+            font-size: 8pt;
+        }
+
+        @media print {
+            .no-print {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="no-print"
+        style="position: fixed; top: 10px; right: 10px; background: #eee; padding: 10px; border: 1px solid #ccc;">
+        <button onclick="window.print()">Print</button>
+        <button onclick="window.history.back()">Back</button>
+    </div>
+
+    <div class="title">TAX INVOICE</div>
+
+    <!-- MAIN HEADER TABLE -->
+    <table>
+        <tr>
+            <!-- LEFT COLUMN -->
+            <td style="width: 50%;">
+                <div class="text-bold" style="font-size: 11pt;">{{ company.name }}</div>
+                <div>{{ company.address|linebreaksbr }}</div>
+                <div>GSTIN/UIN: {{ company.gstin }}</div>
+                <div>State Name: {{ company.state }}, Code: {{ company.state_code }}</div>
+                <div>Contact: {{ company.contact_number }}</div>
+                <div>E-Mail: {{ company.email }}</div>
+
+                <br>
+                <div class="text-bold">Consignee (Ship to)</div>
+                <div class="text-bold">{{ invoice.location.name }}</div>
+                <div>{{ invoice.location.address|linebreaksbr }}</div>
+                <div>GSTIN/UIN: {{ invoice.location.gstin|default:"-" }}</div>
+                <div>State Name: {{ invoice.location.state }}, Code: {{ invoice.location.state_code }}</div>
+
+                <br>
+                {% with buyer=invoice.buyer|default:invoice.location %}
+                <div class="text-bold">Buyer (Bill to)</div>
+                <div class="text-bold">{{ buyer.name }}</div>
+                <div>{{ buyer.address|linebreaksbr }}</div>
+                <div>GSTIN/UIN: {{ buyer.gstin|default:"-" }}</div>
+                <div>State Name: {{ buyer.state }}, Code: {{ buyer.state_code }}</div>
+                {% endwith %}
+            </td>
+
+            <!-- RIGHT COLUMN -->
+            <td style="width: 50%; padding: 0;">
+                <table class="inner-table no-border">
+                    <tr>
+                        <td>
+                            <div class="small-text text-bold">Invoice No.</div>
+                            <div class="text-bold">
+                                {% if invoice.tally_invoice_number %}
+                                Tally Inv: {{ invoice.tally_invoice_number }}<br>
+                                {% endif %}
+                                {% if invoice.app_invoice_number %}
+                                App Inv: {{ invoice.app_invoice_number }}
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td>
+                            <div class="small-text text-bold">Dated</div>
+                            <div class="text-bold">{{ invoice.date|date:"d-M-y" }}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="small-text text-bold">Delivery Note</div>
+                            <div>{{ invoice.delivery_note|default:"-" }}</div>
+                        </td>
+                        <td>
+                            <div class="small-text text-bold">Mode/Terms of Payment</div>
+                            <div>{{ invoice.mode_terms_payment|default:"-" }}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="small-text text-bold">Reference No. & Date.</div>
+                            <div>{{ invoice.reference_no_date|default:"-" }}</div>
+                        </td>
+                        <td>
+                            <div class="small-text text-bold">Other References</div>
+                            <div>{{ invoice.other_references|default:"-" }}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="small-text text-bold">Buyer's Order No.</div>
+                            <div>{{ invoice.buyers_order_no|default:"-" }}</div>
+                        </td>
+                        <td>
+                            <div class="small-text text-bold">Dated</div>
+                            <div>{{ invoice.buyers_order_date|date:"d-M-y"|default:"" }}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="small-text text-bold">Dispatch Doc No.</div>
+                            <div>{{ invoice.dispatch_doc_no|default:"-" }}</div>
+                        </td>
+                        <td>
+                            <div class="small-text text-bold">Delivery Note Date</div>
+                            <div>{{ invoice.delivery_note_date|date:"d-M-y"|default:"" }}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <div class="small-text text-bold">Dispatched through</div>
+                            <div>{{ invoice.dispatched_through|default:"-" }}</div>
+                        </td>
+                        <td>
+                            <div class="small-text text-bold">Destination</div>
+                            <div>{{ invoice.destination|default:"-" }}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="2">
+                            <div class="small-text text-bold">Terms of Delivery</div>
+                            <div>{{ invoice.terms_of_delivery|default:"-" }}</div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+
+    <!-- ITEMS TABLE -->
+    <table class="item-table" style="border-top: none;">
+        <thead>
+            <tr>
+                <th style="width: 5%;">Sl No.</th>
+                <th style="width: 40%;">Description of Goods</th>
+                <th style="width: 10%;">HSN/SAC</th>
+                <th style="width: 10%;">Quantity</th>
+                <th style="width: 10%;">Rate</th>
+                <th style="width: 5%;">per</th>
+                <th style="width: 20%;">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in invoice.invoiceitem_set.all %}
+            <tr>
+                <td class="text-center">{{ forloop.counter }}</td>
+                <td>
+                    <div class="text-bold">{{ item.item.name }}</div>
+                    {% if item.item.description %}<div class="small-text">{{ item.item.description }}</div>{% endif %}
+                </td>
+                <td class="text-center">{{ item.item.hsn_sac }}</td>
+                <td class="text-center">{{ item.quantity }} Nos</td>
+                <td class="text-end">{{ item.price }}</td>
+                <td class="text-center">Nos</td>
+                <td class="text-end">{{ item.taxable_value|floatformat:2 }}</td>
+            </tr>
+            {% endfor %}
+
+            <tr>
+                <td></td>
+                <td class="text-end text-bold">Output CGST (Total)</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td class="text-end">{{ cgst_amt|floatformat:2 }}</td>
+            </tr>
+            <tr>
+                <td></td>
+                <td class="text-end text-bold">Output SGST (Total)</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td class="text-end">{{ sgst_amt|floatformat:2 }}</td>
+            </tr>
+            {% if is_igst and igst_amt > 0 %}
+            <tr>
+                <td></td>
+                <td class="text-end text-bold">Output IGST (Total)</td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td class="text-end">{{ igst_amt|floatformat:2 }}</td>
+            </tr>
+            {% endif %}
+
+            <tr>
+                <td></td>
+                <td colspan="6" class="small-text">
+                    <br><b>Bill Details:</b><br>
+                    New Ref {{ invoice.tally_invoice_number|default:invoice.app_invoice_number }} 30 Days {{
+                    invoice.total }} Dr
+                </td>
+            </tr>
+
+            <tr class="text-bold">
+                <td></td>
+                <td class="text-end">Total</td>
+                <td></td>
+                <td class="text-center">{{ total_qty|default:"-" }} Nos</td>
+                <td></td>
+                <td></td>
+                <td class="text-end">Rs. {{ invoice.total_amount_in_words }}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div style="padding: 5px; border: 1px solid #000; border-top: none;">
+        Amount Chargeable (in words)<br>
+        <span class="text-bold">{{ invoice.amount_in_words }}</span>
+    </div>
+
+    <div style="margin-top: 5mm;"></div>
+
+    <!-- TAX ANALYSIS MATRIX -->
+    <table class="tax-table">
+        <thead>
+            <tr>
+                <th rowspan="2">HSN/SAC</th>
+                <th rowspan="2">Taxable Value</th>
+                <th colspan="2">CGST</th>
+                <th colspan="2">SGST</th>
+                <th rowspan="2">Total Tax Amount</th>
+            </tr>
+            <tr>
+                <th>Rate</th>
+                <th>Amount</th>
+                <th>Rate</th>
+                <th>Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td class="text-end">Total</td>
+                <td class="text-end">{{ taxable_val|floatformat:2 }}</td>
+                <td class="text-end"></td>
+                <td class="text-end">{{ cgst_amt|floatformat:2 }}</td>
+                <td class="text-end"></td>
+                <td class="text-end">{{ sgst_amt|floatformat:2 }}</td>
+                <td class="text-end">{{ tax_amt|floatformat:2 }}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div style="padding: 5px; border: 1px solid #000; border-top: none;">
+        Tax Amount (in words) : <span class="text-bold">{{ invoice.tax_amount_in_words }}</span>
+    </div>
+
+    <div style="margin-top: 5mm;"></div>
+
+    <!-- FOOTER -->
+    <table class="footer-table">
+        <tr>
+            <td>
+                <br><u>Remarks/Notes:</u><br>
+                {{ invoice.delivery_note|default:"-" }}<br><br>
+                <u>Declaration</u><br>
+                We declare that this document shows the actual details described and that all particulars are true and
+                correct.
+            </td>
+            <td style="vertical-align: top;">
+                Company's Bank Details<br>
+                A/c Holder's Name: <span class="text-bold">{{ company.account_holder_name }}</span><br>
+                Bank Name: <span class="text-bold">{{ company.bank_name }}</span><br>
+                A/c No.: <span class="text-bold">{{ company.account_number }}</span><br>
+                Branch & IFS Code: <span class="text-bold">{{ company.branch_name }} & {{ company.ifsc_code
+                    }}</span><br><br>
+                <div class="text-bold text-end">for {{ company.name }}</div>
+
+                <div class="signature-box">
+                    {% if company.signature %}
+                    <img src="{{ company.signature.url }}" class="signature-img">
+                    {% endif %}
+                </div>
+                <div class="text-end">Authorised Signatory</div>
+            </td>
+        </tr>
+    </table>
+
+</body>
+
+</html>

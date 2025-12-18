@@ -1,0 +1,51 @@
+/* ADD to static/clientdoc/css/styles.css */
+
+.card .actions .disabled {
+    pointer-events: none;
+    opacity: 0.6;
+    background-color: #f0f0f0;
+    color: #888;
+}
+
+/* Status colors */
+.status-drf {
+    color: #ffa500; /* Orange for Draft */
+    font-weight: bold;
+}
+.status-dc {
+    color: #007bff; /* Blue for Delivery Challan */
+    font-weight: bold;
+}
+.status-trp {
+    color: #28a745; /* Green for Transport Logged */
+    font-weight: bold;
+}
+.status-fin {
+    color: #6f42c1; /* Purple for Finalized */
+    font-weight: bold;
+}
+
+/* Status colors for dashboard.html */
+.card .actions .disabled {
+    pointer-events: none;
+    opacity: 0.6;
+    background-color: #f0f0f0;
+    color: #888;
+}
+
+.status-drf {
+    color: #ffa500; /* Orange for Draft */
+    font-weight: bold;
+}
+.status-dc {
+    color: #007bff; /* Blue for Delivery Challan */
+    font-weight: bold;
+}
+.status-trp {
+    color: #28a745; /* Green for Transport Logged */
+    font-weight: bold;
+}
+.status-fin {
+    color: #6f42c1; /* Purple for Finalized */
+    font-weight: bold;
+}

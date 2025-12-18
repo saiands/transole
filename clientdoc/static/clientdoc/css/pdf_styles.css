@@ -1,0 +1,20 @@
+.image-page {
+    width: 100%;
+    text-align: center; /* Centers block elements horizontally */
+}
+.image-container {
+    width: 80%; /* Control the width of the image area */
+    margin: 50px auto 0 auto; /* Centers the container */
+    page-break-after: always; /* Forces each image onto a new page */
+}
+.packed-image {
+    max-width: 100%; /* Image will fit within the container width (80% of page) */
+    max-height: 80vh; /* Limits height to prevent excessive stretching */
+    display: block; /* Ensures margin: auto works for centering */
+    margin: 0 auto; /* Centers the image within the container */
+}
+.page-break {
+    page-break-after: always;
+    visibility: hidden;
+    /* Note: For the last item, remove the page-break or it creates a blank page */
+}

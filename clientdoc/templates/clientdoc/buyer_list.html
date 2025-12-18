@@ -1,0 +1,82 @@
+{% extends 'clientdoc/base.html' %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>{{ title }}</h2>
+        <a href="{% url 'clientdoc:create_buyer' %}" class="btn btn-success">
+            <i class="fas fa-plus"></i> Add New Buyer
+        </a>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4 overflow-hidden">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="bg-light">
+                    <tr>
+                        <th class="ps-4">Buyer Name</th>
+                        <th>Address</th>
+                        <th>State</th>
+                        <th>GSTIN</th>
+                        <th class="text-end pe-4">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="border-top-0">
+                    {% for buyer in page_obj %}
+                    <tr>
+                        <td class="ps-4">
+                            <h6 class="mb-0 fw-bold"><a href="{% url 'clientdoc:buyer_detail' buyer.id %}"
+                                    class="text-decoration-none text-dark">{{ buyer.name }}</a></h6>
+                        </td>
+                        <td>{{ buyer.address|truncatechars:50 }}</td>
+                        <td>{{ buyer.state }}</td>
+                        <td>{{ buyer.gstin|default:"-" }}</td>
+                        <td class="text-end pe-4">
+                            <div class="btn-group">
+                                <a href="{% url 'clientdoc:edit_buyer' buyer.id %}"
+                                    class="btn btn-sm btn-light text-primary" title="Edit">
+                                    <i class="fas fa-edit"></i>
+                                </a>
+                                <a href="{% url 'clientdoc:delete_object' 'buyer' buyer.id %}"
+                                    class="btn btn-sm btn-light text-danger"
+                                    onclick="return confirm('Move buyer to trash?');" title="Delete">
+                                    <i class="fas fa-trash"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center py-5 text-muted">
+                            <i class="fas fa-user-tie fa-3x mb-3 d-block opacity-50"></i>
+                            No buyers found.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav aria-label="Page navigation" class="mt-4">
+        <ul class="pagination justify-content-center">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.previous_page_number }}">Previous</a>
+            </li>
+            {% endif %}
+            <li class="page-item active">
+                <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+            </li>
+            {% if page_obj.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.next_page_number }}">Next</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,452 @@
+{% extends 'clientdoc/base.html' %}
+{% load static %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        {% include 'clientdoc/includes/workflow_steps.html' with current_step=1 progress_percentage=0 %}
+    </div>
+</div>
+
+<div class="container-fluid py-4" style="max-width: 1600px;">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold text-primary mb-0"><i class="bi bi-receipt-cutoff me-2"></i>Create New Invoice</h2>
+            <p class="text-muted mb-0">Enter client details and add items to generate invoice.</p>
+        </div>
+        <div>
+            <a href="{% url 'clientdoc:dashboard' %}" class="btn btn-light border"><i class="bi bi-x-lg me-1"></i>
+                Cancel</a>
+        </div>
+    </div>
+
+    {% if messages %}
+    <div class="messages mb-4">
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} shadow-sm border-0 rounded-3 alert-dismissible fade show">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <form method="post" action="{% url 'clientdoc:create_invoice' %}" id="invoice-form" class="needs-validation"
+        novalidate>
+        {% csrf_token %}
+        <div id="formset-management">
+            {{ formset.management_form }}
+        </div>
+
+        <div class="row g-4">
+            <!-- LEFT COLUMN: Client Details -->
+            <div class="col-lg-3">
+                <div class="card border-0 shadow-sm h-100"
+                    style="background: linear-gradient(145deg, #ffffff, #f8f9fa);">
+                    <div class="card-header bg-transparent border-0 pt-4 px-4 pb-0">
+                        <h5 class="fw-bold text-dark mb-0"><i class="bi bi-person-circle me-2 text-primary"></i>Client
+                            Details</h5>
+                    </div>
+                    <div class="card-body px-4 pt-3">
+                        <div class="mb-3">
+                            <label for="location"
+                                class="form-label fw-bold small text-uppercase text-secondary">Location (Ship To) <span
+                                    class="text-danger">*</span></label>
+                            <select name="location" id="location"
+                                class="form-select form-select-lg shadow-none border-secondary-subtle" required>
+                                <option value="">--- Select Location ---</option>
+                                {% for location in locations %}
+                                <option value="{{ location.id }}">{{ location.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <div class="invalid-feedback">Please select a location.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="buyer" class="form-label fw-bold small text-uppercase text-secondary">Buyer
+                                (Bill To)</label>
+                            <select name="buyer" id="buyer" class="form-select shadow-none border-secondary-subtle">
+                                <option value="">--- Same as Location ---</option>
+                                {% for buyer in buyers %}
+                                <option value="{{ buyer.id }}">{{ buyer.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <div class="form-text small">Leave blank if same as Location.</div>
+                        </div>
+
+                        <hr class="my-4 text-muted opacity-25">
+
+                        <div class="mb-3">
+                            <label for="date" class="form-label fw-bold small text-uppercase text-secondary">Invoice
+                                Date & Time</label>
+                            <input type="datetime-local" class="form-control" id="date" name="date">
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="tally_invoice_number"
+                                class="form-label fw-bold small text-uppercase text-secondary">Tally Invoice No.</label>
+                            <input type="text" class="form-control" id="tally_invoice_number"
+                                name="tally_invoice_number" placeholder="Optional">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT COLUMN: Item Table -->
+            <div class="col-lg-9">
+                <div class="card border-0 shadow-sm">
+                    <div
+                        class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                        <h5 class="fw-bold text-dark mb-0"><i class="bi bi-box-seam me-2 text-primary"></i>Invoice Items
+                        </h5>
+                        <button type="button" class="btn btn-primary rounded-pill px-4" id="add-item-btn">
+                            <i class="bi bi-plus-lg me-1"></i> Add Row
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive">
+                            <table class="table table-hover mb-0 align-middle" id="item-table"
+                                style="min-width: 1200px;">
+                                <thead class="bg-light text-secondary text-uppercase small">
+                                    <tr>
+                                        <th style="width: 20%; padding: 12px 16px;">Item Name</th>
+                                        <th style="width: 10%; padding: 12px;">GST %</th>
+                                        <th style="width: 8%; padding: 12px;">Qty Ship</th>
+                                        <th style="width: 8%; padding: 12px;">Qty Bill</th>
+                                        <th style="width: 6%; padding: 12px;">Unit</th>
+                                        <th style="width: 10%; padding: 12px;">Rate (₹)</th>
+                                        <th style="width: 10%; padding: 12px;">Disc Type</th>
+                                        <th style="width: 10%; padding: 12px;">Disc Val</th>
+                                        <th style="width: 13%; padding: 12px;" class="text-end">Amount (₹)</th>
+                                        <th style="width: 5%; padding: 12px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody class="border-top-0">
+                                    <!-- Rows added via JS -->
+                                    {{ formset.management_form }}
+                                </tbody>
+                                <tfoot class="table-group-divider bg-light fw-bold">
+                                    <tr>
+                                        <td colspan="3" class="text-end text-muted small text-uppercase pt-3">Total Qty
+                                            (Billed)</td>
+                                        <td class="pt-3" style="padding-left:12px;"><span id="total-qty-billed">0</span>
+                                        </td>
+                                        <td colspan="4" class="text-end text-muted small text-uppercase pt-3">Total
+                                            Taxable</td>
+                                        <td class="text-end pt-3 text-primary" id="total-taxable"
+                                            style="padding-right:12px;">0.00</td>
+                                        <td></td>
+                                    </tr>
+                                    <tr>
+                                        <td colspan="8" class="text-end text-muted small text-uppercase">Total GST</td>
+                                        <td class="text-end text-danger" id="total-gst" style="padding-right:12px;">0.00
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                    <tr class="bg-primary-subtle border-top border-primary">
+                                        <td colspan="8" class="text-end text-uppercase text-primary pt-4 pb-4"
+                                            style="font-size: 1.1rem;">Grand Total</td>
+                                        <td class="text-end pt-4 pb-4 fw-bold text-primary"
+                                            style="font-size: 1.3rem; padding-right:12px;" id="grand-total">0.00</td>
+                                        <td></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end p-4 bg-light bg-opacity-10 border-top">
+                        <button type="submit" class="btn btn-primary btn-lg px-5 shadow rounded-pill fw-bold">
+                            Create Invoice <i class="bi bi-arrow-right ms-2"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- ITEM DATA -->
+<script id="items-data" type="application/json">
+[
+    {% for item in items %}
+    {
+        "id": "{{ item.id }}",
+        "name": "{{ item.name|escapejs }}",
+        "price": {{ item.price }},
+        "gst_rate": {{ item.gst_rate }},
+        "unit": "{{ item.unit|default:'Nos'|escapejs }}"
+    }{% if not forloop.last %},{% endif %}
+    {% endfor %}
+]
+</script>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const itemTableBody = document.querySelector('#item-table tbody');
+        const addItemBtn = document.getElementById('add-item-btn');
+        const availableItems = JSON.parse(document.getElementById('items-data').textContent);
+        const totalFormsInput = document.getElementById('id_invoiceitem_set-TOTAL_FORMS') || document.getElementById('id_form-TOTAL_FORMS'); // Robust check
+
+        // Element caching for totals
+        const totalQtyBilledEl = document.getElementById('total-qty-billed');
+        const totalTaxableEl = document.getElementById('total-taxable');
+        const totalGstEl = document.getElementById('total-gst');
+        const grandTotalEl = document.getElementById('grand-total');
+
+        function addItemRow() {
+            if (!totalFormsInput) {
+                console.error("Management form TOTAL_FORMS input not found!");
+                return;
+            }
+
+            const formIdx = parseInt(totalFormsInput.value);
+            const row = itemTableBody.insertRow();
+            row.className = 'item-row align-middle';
+
+            // Prefix for fields: form-N-field
+            const prefix = `invoiceitem_set-${formIdx}`;
+            // Note: If using generic factory (InvoiceItemFormSet in views), prefix is likely 'invoiceitem_set' or 'form'.
+            // Let's check the management form ID. Usually 'id_invoiceitem_set-TOTAL_FORMS' implies 'invoiceitem_set'.
+            // If the view used 'formset = InvoiceItemFormSet(...)', correct.
+            // But if it used 'formset = inlineformset_factory(...)', it defaults to model lowercase_set usually?
+            // Wait, in views.py: formset = InvoiceItemFormSet(request.POST, instance=invoice)
+            // In forms.py: InvoiceItemFormSet = inlineformset_factory(SalesInvoice, InvoiceItem, ...)
+            // The default prefix for inlineformset_factory is usually related to the related model name 'invoiceitem_set'.
+            // We'll detect the prefix from the management form ID itself.
+            let formPrefix = 'invoiceitem_set';
+            if (totalFormsInput.id.startsWith('id_form-')) formPrefix = 'form';
+            else if (totalFormsInput.id.startsWith('id_invoiceitem_set-')) formPrefix = 'invoiceitem_set';
+
+            const currentPrefix = `${formPrefix}-${formIdx}`;
+
+            // Helper to create inputs with correct names and classes
+            const createInput = (fieldName, val, type = 'text', step = null) => {
+                const input = document.createElement('input');
+                input.type = type;
+                input.name = `${currentPrefix}-${fieldName}`;
+                input.id = `id_${currentPrefix}-${fieldName}`;
+                input.value = val;
+                if (step) input.step = step;
+                input.className = 'form-control border-secondary-subtle'; // Bigger default
+                return input;
+            };
+
+            const createSelect = (fieldName, options) => {
+                const select = document.createElement('select');
+                select.name = `${currentPrefix}-${fieldName}`;
+                select.id = `id_${currentPrefix}-${fieldName}`;
+                select.className = 'form-select border-secondary-subtle';
+                options.forEach(opt => {
+                    const option = new Option(opt.text, opt.val);
+                    select.add(option);
+                });
+                return select;
+            };
+
+            // 1. Item Selection
+            const itemCell = row.insertCell();
+            itemCell.style.padding = '10px';
+            const select = document.createElement('select');
+            select.name = `${currentPrefix}-item`;
+            select.className = 'form-select item-select shadow-none border-secondary-subtle';
+            select.required = true;
+            select.innerHTML = '<option value="">Select Item...</option>';
+            availableItems.forEach(item => {
+                const option = new Option(item.name, item.id);
+                option.dataset.price = item.price;
+                option.dataset.gst = item.gst_rate;
+                option.dataset.unit = item.unit;
+                select.add(option);
+            });
+            itemCell.appendChild(select);
+
+            // 2. GST %
+            const gstCell = row.insertCell();
+            gstCell.style.padding = '10px';
+            const gstOptions = [
+                { val: '0.00', text: '0%' },
+                { val: '0.05', text: '5%' },
+                { val: '0.12', text: '12%' },
+                { val: '0.18', text: '18%' },
+                { val: '0.28', text: '28%' },
+                { val: '0.40', text: '40%' }
+            ];
+            const gstSelect = createSelect('gst_rate', gstOptions);
+            gstSelect.value = '0.18'; // Default
+            gstCell.appendChild(gstSelect);
+
+            // 3. Qty Shipped
+            const shippedCell = row.insertCell();
+            shippedCell.style.padding = '10px';
+            const shippedInput = createInput('quantity_shipped', 0, 'number');
+            shippedInput.classList.add('text-center');
+            shippedCell.appendChild(shippedInput);
+
+            // 4. Qty Billed
+            const billedCell = row.insertCell();
+            billedCell.style.padding = '10px';
+            const billedInput = createInput('quantity_billed', 1, 'number');
+            billedInput.classList.add('text-center', 'fw-bold');
+            billedCell.appendChild(billedInput);
+
+            // 5. Unit
+            const unitCell = row.insertCell();
+            unitCell.className = "text-center text-muted small unit-display";
+            unitCell.textContent = "-";
+
+            // 6. Rate
+            const rateCell = row.insertCell();
+            rateCell.style.padding = '10px';
+            const rateInput = createInput('price', 0.00, 'number', '0.01');
+            rateCell.appendChild(rateInput);
+
+            // 7. Disc Type
+            const discTypeCell = row.insertCell();
+            discTypeCell.style.padding = '10px';
+            const discOptions = [{ val: 'Percentage', text: '%' }, { val: 'Amount', text: '₹' }];
+            const discTypeSelect = createSelect('discount_type', discOptions);
+            discTypeCell.appendChild(discTypeSelect);
+
+            // 8. Disc Value
+            const discValueCell = row.insertCell();
+            discValueCell.style.padding = '10px';
+            const discValueInput = createInput('discount_value', 0.00, 'number', '0.01');
+            discValueCell.appendChild(discValueInput);
+
+            // 9. Amount
+            const amountCell = row.insertCell();
+            amountCell.className = "text-end fw-bold text-dark amount-display h5 mb-0";
+            amountCell.style.verticalAlign = 'middle';
+            amountCell.textContent = "0.00";
+
+            // 10. Actions
+            const actionCell = row.insertCell();
+            actionCell.className = "text-center";
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'btn btn-outline-danger border-0 remove-item-btn';
+            deleteBtn.innerHTML = '<i class="bi bi-trash"></i>';
+            deleteBtn.onclick = function () {
+                // For a create form, we can just remove the row. 
+                // Note: For UpdateView with deletions, we'd need ID field + DELETE checkbox.
+                row.remove();
+                calculateTotals();
+            };
+            actionCell.appendChild(deleteBtn);
+
+            // Events
+            select.addEventListener('change', () => updateRowData(row, select.value));
+            [billedInput, rateInput, gstSelect, discTypeSelect, discValueInput].forEach(el => {
+                el.addEventListener('input', calculateTotals);
+                el.addEventListener('change', calculateTotals);
+            });
+
+            // Increment Total Forms
+            totalFormsInput.value = formIdx + 1;
+        }
+
+        function updateRowData(row, itemId) {
+            const item = availableItems.find(i => i.id == itemId);
+            if (item) {
+                // Find rate input - tricky selector unless we use name endsWith
+                const rateInput = row.querySelector('input[name$="-price"]');
+                if (rateInput) rateInput.value = parseFloat(item.price).toFixed(2);
+
+                const gstSelect = row.querySelector('select[name$="-gst_rate"]');
+                if (gstSelect && item.gst_rate) {
+                    let target = parseFloat(item.gst_rate).toFixed(2);
+                    // Match option
+                    let matched = false;
+                    for (let i = 0; i < gstSelect.options.length; i++) {
+                        if (parseFloat(gstSelect.options[i].value).toFixed(2) === target) {
+                            gstSelect.selectedIndex = i;
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if (!matched) gstSelect.value = '0.18';
+                }
+
+                row.cells[4].textContent = item.unit;
+            }
+            calculateTotals();
+        }
+
+        function calculateTotals() {
+            let totalQty = 0;
+            let totalTaxable = 0;
+            let totalGst = 0;
+
+            // Iterate over rows visually present
+            // Note: formset validation requires contiguous indices if we were POSTing and validation failed,
+            // but for simple create flow, backend often handles gaps or we could re-index on submit.
+            // For now, we assume standard usage.
+
+            document.querySelectorAll('.item-row').forEach(row => {
+                // Selector helpers
+                const getVal = (suffix) => {
+                    const el = row.querySelector(`[name$="-${suffix}"]`);
+                    return el ? (parseFloat(el.value) || 0) : 0;
+                };
+
+                const qty = getVal('quantity_billed');
+                const rate = getVal('price');
+                const gstRate = getVal('gst_rate');
+                const discVal = getVal('discount_value');
+
+                const discTypeEl = row.querySelector(`[name$="-discount_type"]`);
+                const discType = discTypeEl ? discTypeEl.value : 'Percentage';
+
+                let gross = qty * rate;
+                let discount = 0;
+                if (discType === 'Percentage') {
+                    discount = gross * (discVal / 100);
+                } else {
+                    discount = discVal;
+                }
+
+                let taxable = Math.max(0, gross - discount);
+                let gstAmt = taxable * gstRate;
+
+                // Update Row Amount
+                const amountDisplay = row.querySelector('.amount-display');
+                if (amountDisplay) amountDisplay.textContent = taxable.toFixed(2);
+
+                totalQty += qty;
+                totalTaxable += taxable;
+                totalGst += gstAmt;
+            });
+
+            if (totalQtyBilledEl) totalQtyBilledEl.textContent = totalQty;
+            if (totalTaxableEl) totalTaxableEl.textContent = totalTaxable.toFixed(2);
+            if (totalGstEl) totalGstEl.textContent = totalGst.toFixed(2);
+            if (grandTotalEl) grandTotalEl.textContent = (totalTaxable + totalGst).toFixed(2);
+        }
+
+        if (addItemBtn) addItemBtn.addEventListener('click', addItemRow);
+
+        // Initial Add
+        // Wait for management form to be available in DOM
+        setTimeout(() => {
+            // Check if we already have rows (e.g. form errors returned from server)
+            const existingRows = document.querySelectorAll('.item-row');
+            if (existingRows.length === 0) {
+                addItemRow();
+            } else {
+                // Attach listeners to existing rows if server returned form with errors
+                // (We would need more complex logic to re-bind events to server-rendered rows)
+            }
+        }, 100);
+
+        // Date Default
+        const dateInput = document.getElementById('date');
+        if (dateInput && !dateInput.value) {
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            dateInput.value = now.toISOString().slice(0, 16);
+        }
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,149 @@
+{% extends 'clientdoc/base.html' %}
+{% block title %}Dashboard{% endblock %}
+{% load static %}
+{% block content %}
+<div class="row g-4 mb-5">
+    <!-- Total Invoices -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm bg-primary text-white h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-white-50">Total Invoices</h6>
+                        <h2 class="card-title mb-0">{{ total_invoices|default:"0" }}</h2>
+                    </div>
+                    <i class="fas fa-file-invoice fa-2x text-white-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Finalized -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm bg-success text-white h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-white-50">Finalized</h6>
+                        <h2 class="card-title mb-0">{{ total_finalized|default:"0" }}</h2>
+                    </div>
+                    <i class="fas fa-check-circle fa-2x text-white-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Action -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm bg-white h-100">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Create New</h6>
+                <a href="{% url 'clientdoc:create_invoice' %}" class="btn btn-primary w-100 mb-2">
+                    <i class="fas fa-plus me-2"></i>New Invoice
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Trash Bin -->
+    <div class="col-md-3">
+        <div class="card border-0 shadow-sm bg-light h-100">
+            <div class="card-body">
+                <h6 class="card-subtitle mb-2 text-muted">Management</h6>
+                <a href="{% url 'clientdoc:trash_list' %}" class="btn btn-outline-danger w-100">
+                    <i class="fas fa-trash me-2"></i>Trash Bin
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Recent Invoices Table -->
+    <div class="col-lg-8">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white py-3 d-flex justify-content-between">
+                <h5 class="mb-0">Recent Invoices</h5>
+                <a href="{% url 'clientdoc:invoice_list' %}" class="btn btn-sm btn-link">View All</a>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Inv #</th>
+                            <th>Date</th>
+                            <th>Total</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for invoice in invoices %}
+                        <tr>
+                            <td>
+                                <div class="fw-bold">{{ invoice.tally_invoice_number|default:"-" }}</div>
+                                <small class="text-muted">{{ invoice.app_invoice_number }}</small>
+                            </td>
+                            <td>{{ invoice.date|date:"d M Y" }}</td>
+                            <td>₹{{ invoice.total }}</td>
+                            <td>
+                                {% if invoice.status == 'FIN' %}
+                                <span class="badge bg-success">Finalized</span>
+                                {% elif invoice.status == 'TRP' %}
+                                <span class="badge bg-info text-dark">Transport Logged</span>
+                                {% elif invoice.status == 'DC' %}
+                                <span class="badge bg-warning text-dark">DC Logged</span>
+                                {% else %}
+                                <span class="badge bg-secondary">Draft</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if invoice.status == 'DRF' %}
+                                <a href="{% url 'clientdoc:edit_invoice' invoice.id %}"
+                                    class="btn btn-sm btn-outline-primary">Edit</a>
+                                {% elif invoice.status == 'DC' %}
+                                <a href="{% url 'clientdoc:edit_transport' invoice.id %}"
+                                    class="btn btn-sm btn-outline-warning">Transport</a>
+                                {% elif invoice.status == 'TRP' %}
+                                <a href="{% url 'clientdoc:create_confirmation' invoice.id %}"
+                                    class="btn btn-sm btn-outline-info">Finalize</a>
+                                {% elif invoice.status == 'FIN' %}
+                                <a href="{% url 'clientdoc:create_confirmation' invoice.id %}"
+                                    class="btn btn-sm btn-outline-success">View</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="5" class="text-center py-3">No recent invoices.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Activity Log -->
+    <div class="col-lg-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-3">
+                <h5 class="mb-0">Recent Activity</h5>
+            </div>
+            <ul class="list-group list-group-flush">
+                {% for log in recent_logs %}
+                <li class="list-group-item">
+                    <div class="d-flex justify-content-between">
+                        <strong>{{ log.action }}</strong>
+                        <small class="text-muted">{{ log.timestamp|timesince }} ago</small>
+                    </div>
+                    <small class="text-muted d-block text-truncate">{{ log.details }}</small>
+                </li>
+                {% empty %}
+                <li class="list-group-item text-center">No recent activity.</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}

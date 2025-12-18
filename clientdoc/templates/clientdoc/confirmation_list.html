@@ -1,0 +1,93 @@
+{% extends 'clientdoc/base.html' %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2 class="mb-4">{{ title }}</h2>
+
+    {% include 'clientdoc/includes/list_header.html' %}
+
+    <div class="table-responsive">
+        <table class="table table-hover shadow-sm bg-white rounded">
+            <thead class="table-light">
+                <tr>
+                    <th>App List ID</th>
+                    <th>Date</th>
+                    <th>Invoice Ref</th>
+                    <th>Location</th>
+                    <th>Status</th>
+                    <th>Documents</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for doc in page_obj %}
+                <tr>
+                    <td><span class="badge bg-light text-dark border">app_cnf_{{ doc.id }}</span></td>
+                    <td>{{ doc.date|date:"Y-m-d" }}</td>
+                    <td>{{ doc.invoice.tally_invoice_number|default:doc.invoice.app_invoice_number }}</td>
+                    <td>{{ doc.invoice.location.name }}</td>
+                    <td>
+                        {% if doc.combined_pdf %}
+                        <span class="badge bg-success">Generated</span>
+                        {% else %}
+                        <span class="badge bg-warning text-dark">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if doc.po_file %}
+                        <a href="{{ doc.po_file.url }}" target="_blank"
+                            class="badge bg-info text-decoration-none">PO</a>
+                        {% endif %}
+                        {% if doc.approval_email_file %}
+                        <a href="{{ doc.approval_email_file.url }}" target="_blank"
+                            class="badge bg-info text-decoration-none">Email</a>
+                        {% endif %}
+                        {% if doc.combined_pdf %}
+                        <a href="{{ doc.combined_pdf.url }}" target="_blank"
+                            class="badge bg-primary text-decoration-none">Final PDF</a>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="{% url 'clientdoc:create_confirmation' doc.invoice.id %}"
+                            class="btn btn-sm btn-outline-primary">Manage</a>
+                        <a href="{% url 'clientdoc:delete_object' 'confirmation' doc.id %}"
+                            class="btn btn-sm btn-outline-danger"
+                            onclick="return confirm('Move this confirmation to trash?');" title="Delete"><i
+                                class="fas fa-trash"></i></a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="7" class="text-center py-4">No Confirmation Documents found.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav aria-label="Page navigation" class="mt-4">
+        <ul class="pagination justify-content-center">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+                <a class="page-link"
+                    href="?page={{ page_obj.previous_page_number }}{% if request.GET.q %}&q={{ request.GET.q }}{% endif %}{% if request.GET.sort %}&sort={{ request.GET.sort }}{% endif %}">Previous</a>
+            </li>
+            {% endif %}
+
+            <li class="page-item active">
+                <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+            </li>
+
+            {% if page_obj.has_next %}
+            <li class="page-item">
+                <a class="page-link"
+                    href="?page={{ page_obj.next_page_number }}{% if request.GET.q %}&q={{ request.GET.q }}{% endif %}{% if request.GET.sort %}&sort={{ request.GET.sort }}{% endif %}">Next</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+{% endblock %}

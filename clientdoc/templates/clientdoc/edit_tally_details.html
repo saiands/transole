@@ -1,0 +1,152 @@
+{% extends 'clientdoc/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        {% include 'clientdoc/includes/workflow_steps.html' with current_step=1 progress_percentage=25 %}
+    </div>
+</div>
+
+<div class="container-fluid py-4" style="max-width: 1400px;">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="fw-bold text-primary mb-0"><i class="bi bi-pencil-square me-2"></i>Edit Invoice Details</h2>
+            <p class="text-muted mb-0">Update Tally invoicing details and additional notes.</p>
+        </div>
+        <div>
+            <!-- Print Button as requested -->
+            <a href="{% url 'clientdoc:print_invoice' invoice_id=form.instance.id %}" target="_blank"
+                class="btn btn-dark shadow-sm me-2">
+                <i class="bi bi-printer me-2"></i>Print Invoice
+            </a>
+            <a href="{% url 'clientdoc:invoice_list' %}" class="btn btn-light border"><i
+                    class="bi bi-arrow-left me-1"></i> Back to List</a>
+        </div>
+    </div>
+
+    <!-- Messages handled by base.html -->
+
+    <div class="card border-0 shadow-lg rounded-4 overflow-hidden">
+        <div class="card-header bg-primary text-white py-3 px-4">
+            <div class="d-flex justify-content-between align-items-center">
+                <h5 class="mb-0 fw-bold">Invoice Header & Terms</h5>
+                <span class="badge bg-white text-primary rounded-pill px-3">Invoice #{{
+                    invoice.tally_invoice_number|default:invoice.app_invoice_number }}</span>
+            </div>
+        </div>
+
+        <div class="card-body p-5 bg-white">
+            <form method="post" class="needs-validation" novalidate>
+                {% csrf_token %}
+
+                <!-- Layout utilizing Crispy Forms if available, or manual nice layout -->
+                <!-- We will use manual layout for maximum control over "Modern Arrangement" -->
+
+                <div class="row g-4 mb-4">
+                    <!-- Section 1: Core Details -->
+                    <div class="col-md-12">
+                        <h6 class="text-uppercase text-secondary fw-bold small mb-3 border-bottom pb-2">Core Info</h6>
+                        <div class="row g-3">
+                            <div class="col-md-6 col-xl-3">
+                                {{ form.buyer|as_crispy_field }}
+                            </div>
+                            <div class="col-md-6 col-xl-3">
+                                {{ form.location|as_crispy_field }}
+                            </div>
+                            <div class="col-md-6 col-xl-3">
+                                {{ form.date|as_crispy_field }}
+                            </div>
+                            <div class="col-md-6 col-xl-3">
+                                {{ form.tally_invoice_number|as_crispy_field }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Remarks (Requested) -->
+                    <div class="col-md-12">
+                        <h6 class="text-uppercase text-secondary fw-bold small mb-3 border-bottom pb-2 mt-2">Remarks &
+                            Notes</h6>
+                        <div class="row">
+                            <div class="col-md-12">
+                                {{ form.remark|as_crispy_field }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 3: Delivery Details -->
+                    <div class="col-md-12">
+                        <h6 class="text-uppercase text-secondary fw-bold small mb-3 border-bottom pb-2 mt-2">Delivery &
+                            Order Details</h6>
+                        <div class="row g-3">
+                            <div class="col-md-3">
+                                {{ form.buyers_order_no|as_crispy_field }}
+                            </div>
+                            <div class="col-md-3">
+                                {{ form.buyers_order_date|as_crispy_field }}
+                            </div>
+                            <div class="col-md-3">
+                                {{ form.dispatch_doc_no|as_crispy_field }}
+                            </div>
+                            <div class="col-md-3">
+                                {{ form.delivery_note_date|as_crispy_field }}
+                            </div>
+
+                            <div class="col-md-3">
+                                {{ form.delivery_note|as_crispy_field }}
+                            </div>
+                            <div class="col-md-3">
+                                {{ form.mode_terms_payment|as_crispy_field }}
+                            </div>
+                            <div class="col-md-3">
+                                {{ form.other_references|as_crispy_field }}
+                            </div>
+                            <div class="col-md-3">
+                                {{ form.reference_no_date|as_crispy_field }}
+                            </div>
+
+                            <div class="col-md-4">
+                                {{ form.dispatched_through|as_crispy_field }}
+                            </div>
+                            <div class="col-md-4">
+                                {{ form.destination|as_crispy_field }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-12">
+                        <h6 class="text-uppercase text-secondary fw-bold small mb-3 border-bottom pb-2 mt-2">Terms of
+                            Delivery</h6>
+                        {{ form.terms_of_delivery|as_crispy_field }}
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center mt-5 pt-3 border-top">
+                    <div class="text-muted small">
+                        Verify all details before finalizing.
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" name="action" value="save_continue"
+                            class="btn btn-primary btn-lg px-4 rounded-pill shadow">
+                            Save & Continue <i class="bi bi-chevron-right ms-1"></i>
+                        </button>
+                        <button type="submit" name="action" value="save_only"
+                            class="btn btn-outline-primary btn-lg px-4 rounded-pill">
+                            Save
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Bottom Action Bar (Requested) -->
+        <div class="card-footer bg-light py-3 px-5 d-flex justify-content-center">
+            <a href="{% url 'clientdoc:print_invoice' invoice_id=form.instance.id %}" target="_blank"
+                class="btn btn-dark shadow-sm w-50">
+                <i class="bi bi-printer me-2"></i>Print Invoice Now
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

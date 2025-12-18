@@ -1,0 +1,47 @@
+<div class="row mb-3 align-items-center">
+    <div class="col-md-6">
+        <form method="get" class="d-flex">
+            <input type="text" name="q" class="form-control me-2" placeholder="Search..." value="{{ request.GET.q }}">
+            {% if request.GET.sort %}
+            <input type="hidden" name="sort" value="{{ request.GET.sort }}">
+            {% endif %}
+            <button type="submit" class="btn btn-outline-primary"><i class="fas fa-search"></i></button>
+            {% if request.GET.q %}
+            <a href="{{ request.path }}" class="btn btn-outline-secondary ms-2" title="Clear Search"><i
+                    class="fas fa-times"></i></a>
+            {% endif %}
+        </form>
+    </div>
+    <div class="col-md-6 text-end">
+        <a href="{% url 'clientdoc:dashboard' %}" class="btn btn-outline-secondary me-2">
+            <i class="fas fa-th-large me-1"></i> Dashboard
+        </a>
+        <div class="dropdown d-inline-block">
+            <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="sortDropdown"
+                data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="fas fa-sort me-1"></i> Sort By
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="sortDropdown">
+                <li>
+                    <h6 class="dropdown-header">Date</h6>
+                </li>
+                <li><a class="dropdown-item"
+                        href="?sort=-date{% if request.GET.q %}&q={{ request.GET.q }}{% endif %}">Newest First
+                        (Desc)</a></li>
+                <li><a class="dropdown-item"
+                        href="?sort=date{% if request.GET.q %}&q={{ request.GET.q }}{% endif %}">Oldest First (Asc)</a>
+                </li>
+                <li>
+                    <hr class="dropdown-divider">
+                </li>
+                <li>
+                    <h6 class="dropdown-header">Alphabetical</h6>
+                </li>
+                <li><a class="dropdown-item" href="?sort=az{% if request.GET.q %}&q={{ request.GET.q }}{% endif %}">A to
+                        Z (Asc)</a></li>
+                <li><a class="dropdown-item" href="?sort=za{% if request.GET.q %}&q={{ request.GET.q }}{% endif %}">Z to
+                        A (Desc)</a></li>
+            </ul>
+        </div>
+    </div>
+</div>

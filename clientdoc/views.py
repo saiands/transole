@@ -1,0 +1,926 @@
+# clientdoc/views.py
+
+from django.template.loader import render_to_string
+from django.shortcuts import render, redirect, get_object_or_404
+from django.http import HttpResponse
+from django.contrib import messages
+from django.db import transaction
+from django.core.paginator import Paginator
+from django.conf import settings
+from django.urls import reverse
+from .models import SalesInvoice, InvoiceItem, Item, StoreLocation, DeliveryChallan, TransportCharges, ConfirmationDocument, PackedImage, OurCompanyProfile, ActivityLog, Buyer
+from .forms import InvoiceForm, DeliveryChallanForm, TransportChargesForm, ConfirmationDocumentForm, PackedImageFormSet, ItemForm, StoreLocationForm, BuyerForm, InvoiceItemFormSet
+import json
+from .pdf_generator import generate_invoice_pdf, generate_dc_pdf, generate_transport_pdf
+import logging
+from io import BytesIO
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as PlatypusImage
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from PyPDF2 import PdfMerger, PdfReader
+import os
+
+logger = logging.getLogger(__name__)
+
+# --- PDF GENERATION HELPERS ---
+
+def generate_packed_images_pdf(confirmation):
+    """Generates a PDF page for packed images."""
+    images = confirmation.packedimage_set.all()
+    if not images.exists():
+        return None 
+
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    margin = 50
+    img_width = width - (2 * margin) 
+    img_height = 250 
+    spacing = 20
+    y = height - margin
+    
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(margin, y, "Packed Goods Images")
+    y -= 40
+    
+    for image_obj in images:
+        if y < margin + img_height + spacing:
+            c.showPage()
+            y = height - margin - 20 
+            
+        try:
+            img_path = image_obj.image.path
+            img = ImageReader(img_path) 
+            
+            aspect = img.getSize()[1] / img.getSize()[0]
+            current_img_height = img_width * aspect
+            
+            if current_img_height > img_height:
+                current_img_height = img_height
+
+            c.drawImage(img, margin, y - current_img_height, width=img_width, height=current_img_height)
+            
+            c.setFont("Helvetica", 10)
+            notes_y = y - current_img_height - 10
+            c.drawString(margin, notes_y, f"Notes: {image_obj.notes or 'N/A'}")
+
+            y -= (current_img_height + spacing + 20) 
+
+        except Exception as e:
+            logger.error(f"Error drawing image {image_obj.id} to PDF: {e}")
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(margin, y, f"Error loading image {image_obj.id}: {e}")
+            y -= 30
+            
+    c.save()
+    buffer.seek(0)
+    return buffer
+
+
+# --- 1. DASHBOARD & LIST VIEWS (FIX 3: Corrected List Views) ---
+
+def dashboard(request):
+    """Shows system overview and recent activity (recent invoices)."""
+    invoices = SalesInvoice.objects.all().select_related('location').order_by('-date')[:10]
+    total_invoices = SalesInvoice.objects.count()
+    total_finalized = SalesInvoice.objects.filter(status='FIN').count()
+    
+    context = {
+        'invoices': invoices,
+        'total_invoices': total_invoices,
+        'total_finalized': total_finalized
+    }
+    
+    recent_logs = ActivityLog.objects.order_by('-timestamp')[:10]
+    
+    context['recent_logs'] = recent_logs
+    return render(request, 'clientdoc/dashboard.html', context)
+
+def item_detail(request, item_id):
+    """Detail view for a single item."""
+    item = get_object_or_404(Item, id=item_id)
+    return render(request, 'clientdoc/item_detail.html', {'item': item})
+
+def log_activity(action, details=""):
+    ActivityLog.objects.create(action=action, details=details)
+
+def get_filtered_queryset(model_class, request, search_fields):
+    """Helper to filter and sort querysets."""
+    queryset = model_class.objects.all().select_related('invoice') if model_class != SalesInvoice and hasattr(model_class, 'invoice') else model_class.objects.all()
+    if model_class == SalesInvoice:
+        queryset = queryset.select_related('location')
+    elif hasattr(model_class, 'invoice'):
+         queryset = queryset.filter(invoice__is_deleted=False)
+        
+    # Search
+    query = request.GET.get('q')
+    if query:
+        from django.db.models import Q
+        q_objects = Q()
+        for field in search_fields:
+            q_objects |= Q(**{field + '__icontains': query})
+        queryset = queryset.filter(q_objects)
+    
+    # Sort
+    # Sort
+    sort_by = request.GET.get('sort')
+    
+    # Determine default sort if not provided
+    if not sort_by:
+        if hasattr(model_class, 'date'):
+            sort_by = '-date'
+        elif hasattr(model_class, 'created_at'):
+            sort_by = '-created_at'
+        else:
+            sort_by = '-id'
+
+    if sort_by == 'az': 
+        if model_class == SalesInvoice:
+            sort_by = 'tally_invoice_number'
+        elif hasattr(model_class, 'name'):
+            sort_by = 'name'
+        else:
+            sort_by = 'invoice__tally_invoice_number'
+
+    if sort_by == 'za': 
+        if model_class == SalesInvoice:
+            sort_by = '-tally_invoice_number'
+        elif hasattr(model_class, 'name'):
+            sort_by = '-name'
+        else:
+            sort_by = '-invoice__tally_invoice_number'
+            
+    # Better date sorting using created_at if available and date is not
+    if sort_by in ['date', '-date'] and not hasattr(model_class, 'date') and hasattr(model_class, 'created_at'):
+        sort_by = sort_by.replace('date', 'created_at')
+        
+    # Safety check: If trying to sort by date/created_at but model lacks it
+    if 'date' in sort_by and not hasattr(model_class, 'date'):
+        sort_by = '-id'
+    if 'created_at' in sort_by and not hasattr(model_class, 'created_at'):
+        sort_by = '-id'
+    
+    allowed_sorts = [
+         'date', '-date', 
+         'created_at', '-created_at', 
+         'id', '-id', 
+         'total', '-total', 
+         'status', '-status', 
+         'tally_invoice_number', '-tally_invoice_number', 
+         'app_invoice_number', '-app_invoice_number',
+         'invoice__tally_invoice_number', '-invoice__tally_invoice_number', 
+         'invoice__app_invoice_number', '-invoice__app_invoice_number',
+         'invoice__date', '-invoice__date',
+         'name', '-name'
+    ]
+                     
+    if sort_by in allowed_sorts:
+        queryset = queryset.order_by(sort_by)
+    else:
+        # Default sorts
+        if hasattr(model_class, 'date'):
+            queryset = queryset.order_by('-date')
+        elif hasattr(model_class, 'invoice'):
+             queryset = queryset.order_by('-invoice__date')
+        else:
+             queryset = queryset.order_by('-id')
+        
+    return queryset
+
+def trash_list(request):
+    """View to show deleted items."""
+    invoices = SalesInvoice.objects.trash().all()
+    locations = StoreLocation.objects.trash().all()
+    items = Item.objects.trash().all()
+    
+    return render(request, 'clientdoc/trash_list.html', {
+        'invoices': invoices,
+        'locations': locations,
+        'items': items,
+        'title': 'Trash Bin'
+    })
+
+def restore_object(request, model_name, pk):
+    """Restores a soft-deleted object."""
+    model_map = {
+        'invoice': SalesInvoice,
+        'location': StoreLocation,
+        'item': Item,
+        'dc': DeliveryChallan,
+        'transport': TransportCharges,
+        'confirmation': ConfirmationDocument,
+        'buyer': Buyer
+    }
+    model = model_map.get(model_name)
+    if not model:
+        messages.error(request, 'Invalid item type.')
+        return redirect('clientdoc:trash_list')
+        
+    obj = get_object_or_404(model.objects.trash(), pk=pk)
+    obj.restore()
+    log_activity("Restore", f"Restored {model_name} #{pk}")
+    messages.success(request, f'{model_name.title()} restored successfully.')
+    return redirect('clientdoc:trash_list')
+
+def hard_delete_object(request, model_name, pk):
+    """Permanently deletes an object."""
+    model_map = {
+        'invoice': SalesInvoice,
+        'location': StoreLocation,
+        'item': Item,
+        'dc': DeliveryChallan,
+        'transport': TransportCharges,
+        'confirmation': ConfirmationDocument,
+        'buyer': Buyer
+    }
+    model = model_map.get(model_name)
+    if not model:
+        messages.error(request, 'Invalid item type.')
+        return redirect('clientdoc:trash_list')
+        
+    obj = get_object_or_404(model.objects.trash(), pk=pk)
+    obj.hard_delete()
+    log_activity("Permanent Delete", f"Permanently deleted {model_name} #{pk}")
+    messages.warning(request, f'{model_name.title()} permanently deleted.')
+    return redirect('clientdoc:trash_list')
+
+def delete_object(request, model_name, pk):
+    """Soft deletes an object from list view."""
+    model_map = {
+        'invoice': SalesInvoice,
+        'location': StoreLocation,
+        'item': Item,
+        'dc': DeliveryChallan,
+        'transport': TransportCharges,
+        'confirmation': ConfirmationDocument,
+        'buyer': Buyer
+    }
+    model = model_map.get(model_name)
+    if not model:
+        messages.error(request, 'Invalid item type.')
+        return redirect('clientdoc:dashboard')
+
+    obj = get_object_or_404(model, pk=pk)
+    obj.delete() # Soft delete
+    log_activity("Delete", f"Moved {model_name} #{pk} to trash")
+    messages.success(request, f'{model_name.title()} moved to trash.')
+    return redirect(request.META.get('HTTP_REFERER', 'clientdoc:dashboard'))
+
+def invoice_list(request):
+    search_fields = ['tally_invoice_number', 'app_invoice_number', 'location__name', 'date']
+    invoices = get_filtered_queryset(SalesInvoice, request, search_fields)
+    
+    paginator = Paginator(invoices, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'clientdoc/invoice_list.html', {
+        'page_obj': page_obj, 
+        'title': 'Sales Invoice List',
+        'list_type': 'inv'
+    })
+
+def dc_list(request):
+    search_fields = ['invoice__tally_invoice_number', 'invoice__app_invoice_number', 'invoice__location__name', 'date']
+    challans = get_filtered_queryset(DeliveryChallan, request, search_fields)
+    
+    paginator = Paginator(challans, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'clientdoc/dc_list.html', {
+        'page_obj': page_obj, 
+        'title': 'Delivery Challan List',
+        'list_type': 'dc'
+    })
+    
+def transport_list(request):
+    search_fields = ['invoice__tally_invoice_number', 'invoice__app_invoice_number', 'invoice__location__name', 'date', 'description']
+    charges = get_filtered_queryset(TransportCharges, request, search_fields)
+    
+    paginator = Paginator(charges, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'clientdoc/transport_list.html', {
+        'page_obj': page_obj, 
+        'title': 'Transport Charges List',
+        'list_type': 'trp'
+    })
+
+def confirmation_list(request):
+    search_fields = ['invoice__tally_invoice_number', 'invoice__app_invoice_number', 'invoice__location__name', 'date']
+    docs = get_filtered_queryset(ConfirmationDocument, request, search_fields)
+    
+    paginator = Paginator(docs, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'clientdoc/confirmation_list.html', {
+        'page_obj': page_obj, 
+        'title': 'Confirmation Document List',
+        'list_type': 'cnf'
+    })
+
+# --- Utility Functions (Ensure create_item exists) ---
+
+# --- ITEM VIEWS ---
+
+def item_list(request):
+    search_fields = ['name', 'description']
+    items = get_filtered_queryset(Item, request, search_fields)
+    
+    paginator = Paginator(items, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'clientdoc/item_list.html', {
+        'page_obj': page_obj, 
+        'title': 'Item List',
+        'list_type': 'item'
+    })
+
+def edit_item(request, pk):
+    item = get_object_or_404(Item, pk=pk)
+    if request.method == 'POST':
+        form = ItemForm(request.POST, instance=item)
+        if form.is_valid():
+            form.save()
+            log_activity("Edit Item", f"Updated Item {item.name}")
+            messages.success(request, 'Item updated successfully.')
+            return redirect('clientdoc:item_list')
+    else:
+        form = ItemForm(instance=item)
+    return render(request, 'clientdoc/form.html', {'form': form, 'title': 'Edit Item'})
+
+def create_item(request):
+    if request.method == 'POST':
+        form = ItemForm(request.POST) 
+        if form.is_valid():
+            form.save()
+            log_activity("Create Item", f"Created Item {form.instance.name}")
+            messages.success(request, 'Item created successfully.')
+            return redirect('clientdoc:dashboard')
+    else:
+        form = ItemForm()
+    return render(request, 'clientdoc/form.html', {'form': form, 'title': 'Create Item'})
+
+def create_location(request):
+    if request.method == 'POST':
+        form = StoreLocationForm(request.POST) 
+        if form.is_valid():
+            form.save()
+            log_activity("Create Location", f"Created Location {form.instance.name}")
+            messages.success(request, 'Location created successfully.')
+            return redirect('clientdoc:dashboard')
+    else:
+        form = StoreLocationForm()
+    return render(request, 'clientdoc/form.html', {'form': form, 'title': 'Create Store Location'})
+
+def store_location_list(request):
+    search_fields = ['name', 'address', 'city', 'gstin', 'site_code']
+    locations = get_filtered_queryset(StoreLocation, request, search_fields)
+    
+    paginator = Paginator(locations, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'clientdoc/store_location_list.html', {
+        'page_obj': page_obj, 
+        'title': 'Store Client Locations',
+        'list_type': 'location'
+    })
+
+def edit_location(request, pk):
+    location = get_object_or_404(StoreLocation, pk=pk)
+    if request.method == 'POST':
+        form = StoreLocationForm(request.POST, instance=location)
+        if form.is_valid():
+            form.save()
+            log_activity("Edit Location", f"Updated Location {location.name}")
+            messages.success(request, 'Location updated successfully.')
+            return redirect('clientdoc:store_location_list')
+    else:
+        form = StoreLocationForm(instance=location)
+    return render(request, 'clientdoc/form.html', {'form': form, 'title': 'Edit Store Location'})
+
+def store_location_detail(request, pk):
+    location = get_object_or_404(StoreLocation, pk=pk)
+    return render(request, 'clientdoc/store_location_detail.html', {'location': location})
+
+# --- 2. WORKFLOW STEP 1: CREATE INVOICE ITEMS ---
+
+def create_invoice(request):
+    """Handles creation of SalesInvoice and multiple InvoiceItem records using FormSets."""
+    
+    items = Item.objects.all()
+    locations = StoreLocation.objects.all()
+    buyers = Buyer.objects.all()
+    
+    # Use the imported FormSet, or create a factory if specific config needed
+    # formset = InvoiceItemFormSet(queryset=InvoiceItem.objects.none()) # If usage of imported one
+
+    if request.method == 'POST':
+        location_id = request.POST.get('location')
+        buyer_id = request.POST.get('buyer')
+        tally_invoice_number = request.POST.get('tally_invoice_number')
+        date = request.POST.get('date')
+
+        if not location_id:
+            messages.error(request, 'Please select a client location.')
+            return redirect('clientdoc:create_invoice')
+
+        try:
+            with transaction.atomic():
+                location = get_object_or_404(StoreLocation, id=location_id)
+                buyer = None
+                if buyer_id:
+                    buyer = get_object_or_404(Buyer, id=buyer_id)
+                
+                invoice = SalesInvoice.objects.create(location=location, buyer=buyer, status='DRF') 
+                if tally_invoice_number: invoice.tally_invoice_number = tally_invoice_number
+                if date: invoice.date = date
+                invoice.save()
+                
+                # Bind formset to new invoice
+                formset = InvoiceItemFormSet(request.POST, instance=invoice)
+                
+                if formset.is_valid():
+                    instances = formset.save(commit=False)
+                    for instance in instances:
+                        if instance.item_id: # Only save if item is selected
+                            instance.invoice = invoice
+                            instance.save()
+                    
+                    # Also handle deletions if any (though create mode usually doesn't have them)
+                    for obj in formset.deleted_objects:
+                        obj.delete()
+                    invoice.calculate_total()
+                    log_activity("Create Invoice", f"Created Invoice {invoice.id}")
+                    messages.success(request, f'Invoice #{invoice.id} created successfully! Now input Tally details.')
+                    return redirect('clientdoc:edit_invoice', invoice_id=invoice.id)
+                else:
+                    # Rollback if items are invalid
+                    transaction.set_rollback(True)
+                    # Show errors
+                    if formset.non_form_errors():
+                        messages.error(request, formset.non_form_errors())
+                    for form in formset:
+                        for field, errors in form.errors.items():
+                             for error in errors:
+                                 messages.error(request, f"Item Error ({field}): {error}")
+                    messages.error(request, 'Failed to create invoice. Please check item details.')
+
+        except Exception as e:
+            logger.error(f"Invoice Create Error: {e}")
+            messages.error(request, f"Error creating invoice: {str(e)}")
+
+    else:
+        # GET request - Initialize empty formset so we have management form
+        # We pass instance=None or a dummy unsaved instance? 
+        # inlineformset factory expects instance. SalesInvoice() is fine.
+        formset = InvoiceItemFormSet(instance=SalesInvoice())
+
+    return render(request, 'clientdoc/invoice_form.html', {
+        'locations': locations,
+        'buyers': buyers,
+        'items': items,
+        'formset': formset,
+        'title': 'Create Sales Invoice'
+    })
+
+
+# --- 3. WORKFLOW STEP 2: EDIT INVOICE (TALLY DETAILS) ---
+def edit_invoice(request, invoice_id):
+    invoice = get_object_or_404(SalesInvoice, id=invoice_id)
+    
+    if request.method == 'POST':
+        form = InvoiceForm(request.POST, instance=invoice) 
+        if form.is_valid():
+            form.save()
+            log_activity("Edit Invoice", f"Updated Invoice {invoice.tally_invoice_number or invoice.id} details")
+            
+            # FIX 2: Redirect to the Invoice List after edit
+            messages.success(request, f'Invoice details updated.')
+            
+            if request.POST.get('action') == 'save_continue':
+                return redirect('clientdoc:edit_dc', invoice_id=invoice.id)
+            if request.POST.get('action') == 'save_list':
+                return redirect('clientdoc:invoice_list')
+            
+            return redirect('clientdoc:edit_invoice', invoice_id=invoice.id) 
+    else:
+        form = InvoiceForm(instance=invoice)
+        
+    next_url = reverse('clientdoc:edit_dc', kwargs={'invoice_id': invoice.id})
+
+    return render(request, 'clientdoc/edit_tally_details.html', {
+        'form': form,
+        'invoice': invoice, # Fixed
+        'title': f'Edit Tally Details for Invoice #{invoice.id}',
+        'next_url': next_url, 
+        'current_step': 1,
+        'progress_percentage': 25,
+    })
+
+
+# --- 4. WORKFLOW STEP 3: EDIT DELIVERY CHALLAN (DC) ---
+def edit_dc(request, invoice_id):
+    invoice = get_object_or_404(SalesInvoice, id=invoice_id)
+    dc, created = DeliveryChallan.objects.get_or_create(invoice=invoice)
+
+    if request.method == 'POST':
+        form = DeliveryChallanForm(request.POST, instance=dc)
+        if form.is_valid():
+            form.save()
+            log_activity("Edit DC", f"Updated DC for Invoice {invoice.id}")
+            
+            if invoice.status == 'DRF':
+                invoice.status = 'DC'
+                invoice.save()
+                
+            # FIX 2: Redirect to the DC List after edit
+            messages.success(request, 'Delivery Challan updated.')
+            
+            if request.POST.get('action') == 'save_continue':
+                return redirect('clientdoc:edit_transport', invoice_id=invoice.id)
+            if request.POST.get('action') == 'save_list':
+                return redirect('clientdoc:dc_list')
+                
+            return redirect('clientdoc:edit_dc', invoice_id=invoice.id) 
+    else:
+        form = DeliveryChallanForm(instance=dc)
+    
+    next_url = reverse('clientdoc:edit_transport', kwargs={'invoice_id': invoice.id})
+    prev_url = reverse('clientdoc:edit_invoice', kwargs={'invoice_id': invoice.id})
+
+    return render(request, 'clientdoc/form.html', {
+        'form': form,
+        'title': f'Delivery Challan - Invoice {invoice.tally_invoice_number or invoice.id}',
+        'next_url': next_url,
+        'prev_url': prev_url, 
+        'current_step': 2,
+        'progress_percentage': 50,
+    })
+
+
+# --- 5. WORKFLOW STEP 4: EDIT TRANSPORT CHARGES ---
+def edit_transport(request, invoice_id):
+    invoice = get_object_or_404(SalesInvoice, id=invoice_id)
+    transport, created = TransportCharges.objects.get_or_create(invoice=invoice)
+        
+    if invoice.status not in ['DC', 'TRP', 'FIN']:
+        messages.error(request, 'You must complete the Delivery Challan first.')
+        return redirect('clientdoc:dashboard')
+        
+    if request.method == 'POST':
+        form = TransportChargesForm(request.POST, instance=transport)
+        if form.is_valid():
+            form.save()
+            log_activity("Edit Transport", f"Updated Transport Charges for Invoice {invoice.id}")
+            
+            if invoice.status == 'DC':
+                invoice.status = 'TRP'
+                invoice.save()
+                
+            # FIX 2: Redirect to the Transport Charges List after edit
+            messages.success(request, 'Transport charges updated.')
+            
+            if request.POST.get('action') == 'save_continue':
+                return redirect('clientdoc:create_confirmation', invoice_id=invoice.id)
+            if request.POST.get('action') == 'save_list':
+                return redirect('clientdoc:transport_list')
+                
+            return redirect('clientdoc:edit_transport', invoice_id=invoice.id) 
+    else:
+        form = TransportChargesForm(instance=transport)
+    
+    next_url = reverse('clientdoc:create_confirmation', kwargs={'invoice_id': invoice.id})
+    prev_url = reverse('clientdoc:edit_dc', kwargs={'invoice_id': invoice.id})
+
+    return render(request, 'clientdoc/form.html', {
+        'form': form,
+        'title': f'Transport Charges - Invoice {invoice.tally_invoice_number or invoice.id}',
+        'next_url': next_url,
+        'prev_url': prev_url, 
+        'current_step': 3,
+        'progress_percentage': 75,
+    })
+
+
+# --- 6. WORKFLOW STEP 5: CONFIRMATION & PDF GENERATION (FIX 1: Robust Merging) ---
+
+def create_confirmation(request, invoice_id):
+    invoice = get_object_or_404(SalesInvoice, id=invoice_id)
+    confirmation, created = ConfirmationDocument.objects.get_or_create(invoice=invoice)
+    company_profile = OurCompanyProfile.objects.first() 
+    
+    if invoice.status not in ['TRP', 'FIN']:
+        messages.error(request, 'Cannot access Confirmation Document yet. Please log Transport Charges first.')
+        return redirect('clientdoc:dashboard')
+    
+    # File deletion logic (kept short for brevity)
+    if request.method == 'POST':
+        if 'delete_po' in request.POST and confirmation.po_file:
+            confirmation.po_file.delete(save=False)
+            confirmation.po_file = None
+            confirmation.save()
+            messages.success(request, 'Purchase Order file removed.')
+            return redirect('clientdoc:create_confirmation', invoice_id=invoice_id)
+
+        if 'delete_email' in request.POST and confirmation.approval_email_file:
+            confirmation.approval_email_file.delete(save=False)
+            confirmation.approval_email_file = None
+            confirmation.save()
+            messages.success(request, 'Approval Email file removed.')
+            return redirect('clientdoc:create_confirmation', invoice_id=invoice_id)
+    
+    has_po = bool(confirmation.po_file)
+    has_email = bool(confirmation.approval_email_file)
+
+    if request.method == 'POST':
+        form = ConfirmationDocumentForm(request.POST, request.FILES, instance=confirmation)
+        image_formset = PackedImageFormSet(request.POST, request.FILES, instance=confirmation)
+        
+        if form.is_valid() and image_formset.is_valid():
+            confirmation = form.save()
+            image_formset.save()
+            
+            if 'save_notes' in request.POST:
+                messages.success(request, 'Files and image notes saved successfully.')
+                return redirect('clientdoc:create_confirmation', invoice_id=invoice_id)
+
+            # --- REDIRECT TO CHECKLIST INSTEAD OF AUTO FINALIZE ---
+            messages.success(request, 'Files and image notes saved successfully. Please review and finalize.')
+            return redirect('clientdoc:create_confirmation', invoice_id=invoice_id)
+    
+    else:
+        form = ConfirmationDocumentForm(instance=confirmation)
+        image_formset = PackedImageFormSet(instance=confirmation)
+    
+    prev_url = reverse('clientdoc:edit_transport', kwargs={'invoice_id': invoice.id})
+    packed_images_list = confirmation.packedimage_set.all()
+
+    # Prepare available files for Checklist
+    available_files = [
+        {'id': 'invoice', 'name': 'Tax Invoice (Auto-Generated)', 'required': False},
+    ]
+    if hasattr(invoice, 'deliverychallan'):
+        available_files.append({'id': 'dc', 'name': 'Delivery Challan (Auto-Generated)', 'required': False})
+        
+    if hasattr(invoice, 'transportcharges'):
+        available_files.append({'id': 'transport', 'name': 'Transport Charges (Auto-Generated)', 'required': False})
+    if has_po:
+        available_files.append({'id': 'po', 'name': 'PO Copy (Uploaded)', 'required': False})
+    if has_email:
+        available_files.append({'id': 'email', 'name': 'Approval Email (Uploaded)', 'required': False})
+    
+    # Images are always last usually, but let's allow them in list if we want to be fancy, 
+    # but for now images are appended at end in PDF gen logic typically. 
+    # Let's keep images as a separate "Always at end" block or auto-included.
+    
+    context = {
+        'form': form,
+        'image_formset': image_formset,
+        'invoice': invoice,
+        'title': f'Confirmation & Finalize - Invoice {invoice.tally_invoice_number or invoice.id}',
+        'has_po': has_po,
+        'has_email': has_email,
+        'prev_url': prev_url,
+        'packed_images_list': packed_images_list, 
+        'current_step': 4,
+        'progress_percentage': 90, # Not 100 yet
+        'available_files': available_files
+    }
+    return render(request, 'clientdoc/confirmation_checklist.html', context)
+
+
+def finalize_invoice_pdf(request, invoice_id):
+    """Generates the final PDF based on user selected order."""
+    invoice = get_object_or_404(SalesInvoice, id=invoice_id)
+    confirmation = get_object_or_404(ConfirmationDocument, invoice=invoice)
+    company_profile = OurCompanyProfile.objects.first()
+    
+    if request.method == 'POST':
+        # Get order from POST
+        # Valid separate IDs: invoice, dc, transport, po, email
+        # We expect a comma separated string or list
+        file_order_str = request.POST.get('file_order', 'invoice,dc,transport,po,email') 
+        file_order = file_order_str.split(',')
+        
+        merger = PdfMerger()
+        
+        try:
+            for file_type in file_order:
+                if file_type == 'invoice':
+                    invoice.calculate_total()
+                    merger.append(generate_invoice_pdf(invoice, company_profile))
+                
+                elif file_type == 'dc' and hasattr(invoice, 'deliverychallan'):
+                     merger.append(generate_dc_pdf(invoice, invoice.deliverychallan, company_profile))
+                
+                elif file_type == 'transport' and hasattr(invoice, 'transportcharges'):
+                     merger.append(generate_transport_pdf(invoice, invoice.transportcharges, company_profile))
+                
+                elif file_type == 'po' and confirmation.po_file:
+                    try:
+                        PdfReader(confirmation.po_file.path)
+                        merger.append(confirmation.po_file.path)
+                    except Exception:
+                        pass # Skip invalid
+                
+                elif file_type == 'email' and confirmation.approval_email_file:
+                    try:
+                        PdfReader(confirmation.approval_email_file.path)
+                        merger.append(confirmation.approval_email_file.path)
+                    except Exception:
+                        pass
+
+            # Always append images at the end ?? Or should they be in the order list?
+            # User requirement: "all files... creating the PDF... selection... drag up and down".
+            # Images are a collection of pages. Usually best at end.
+            images_pdf_buffer = generate_packed_images_pdf(confirmation)
+            if images_pdf_buffer:
+                merger.append(images_pdf_buffer)
+            
+            output = BytesIO()
+            merger.write(output)
+            merger.close()
+            output.seek(0)
+            
+            # Save logic ...
+            filename_suffix = invoice.tally_invoice_number or invoice.id
+            filename = f"confirmation_invoice_{filename_suffix}.pdf"
+            
+            # Preview vs Save
+            path = os.path.join(settings.MEDIA_ROOT, 'confirmations', filename)
+            os.makedirs(os.path.dirname(path), exist_ok=True) 
+
+            with open(path, 'wb') as f:
+                f.write(output.getvalue())
+            
+            confirmation.combined_pdf.name = f'confirmations/{filename}'
+            confirmation.save()
+            
+            invoice.status = 'FIN'
+            invoice.save()
+            log_activity("Finalize Invoice", f"Finalized Invoice {invoice.tally_invoice_number or invoice.id}")
+            
+            messages.success(request, f'Document Bundle Generated Successfully!')
+            return redirect('clientdoc:confirmation_list')
+
+        except Exception as e:
+            logger.error(f"Merge error: {e}")
+            messages.error(request, f"Error generating PDF: {e}")
+            return redirect('clientdoc:create_confirmation', invoice_id=invoice.id)
+    
+    return redirect('clientdoc:dashboard')
+
+def create_buyer(request):
+    if request.method == 'POST':
+        form = BuyerForm(request.POST) 
+        if form.is_valid():
+            form.save()
+            log_activity("Create Buyer", f"Created Buyer {form.instance.name}")
+            messages.success(request, 'Buyer created successfully.')
+            return redirect('clientdoc:dashboard')
+    else:
+        form = BuyerForm()
+    return render(request, 'clientdoc/form.html', {'form': form, 'title': 'Create Buyer'})
+
+def buyer_list(request):
+    search_fields = ['name', 'address', 'gstin', 'state']
+    buyers = get_filtered_queryset(Buyer, request, search_fields)
+    
+    paginator = Paginator(buyers, 20)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+    
+    return render(request, 'clientdoc/buyer_list.html', {
+        'page_obj': page_obj, 
+        'title': 'Buyer List',
+        'list_type': 'buyer'
+    })
+
+def edit_buyer(request, pk):
+    buyer = get_object_or_404(Buyer, pk=pk)
+    if request.method == 'POST':
+        form = BuyerForm(request.POST, instance=buyer)
+        if form.is_valid():
+            form.save()
+            log_activity("Edit Buyer", f"Updated Buyer {buyer.name}")
+            messages.success(request, 'Buyer updated successfully.')
+            return redirect('clientdoc:buyer_list')
+    else:
+        form = BuyerForm(instance=buyer)
+    return render(request, 'clientdoc/form.html', {'form': form, 'title': 'Edit Buyer'})
+
+def buyer_detail(request, pk):
+    buyer = get_object_or_404(Buyer, pk=pk)
+    return render(request, 'clientdoc/buyer_detail.html', {'buyer': buyer})
+
+
+def delete_packed_image(request, image_id):
+    """Handles the deletion of a specific packed image, ensuring file removal."""
+    image = get_object_or_404(PackedImage, id=image_id)
+    invoice_id = image.confirmation.invoice.id
+    
+    if request.method == 'POST':
+        if image.image:
+            image.image.delete(save=False) 
+        
+        image.delete()
+        messages.success(request, 'Image successfully removed.')
+    else:
+        messages.error(request, 'Invalid request method.')
+        
+    return redirect('clientdoc:create_confirmation', invoice_id=invoice_id)
+
+def print_invoice(request, invoice_id):
+    """Renders the print-friendly invoice template."""
+    invoice = get_object_or_404(SalesInvoice, id=invoice_id)
+    company_profile = OurCompanyProfile.objects.first()
+    
+    # Ensure totals are calculated
+    invoice.calculate_gst_totals()
+    
+    display_invoice_number = invoice.tally_invoice_number if invoice.tally_invoice_number else invoice.app_invoice_number
+    
+    # Determine IGST vs CGST/SGST based on model's calculated fields
+    # Logic: If igst_total > 0, it's Inter-state. Or check place_of_supply vs company state.
+    # However, model stores totals now.
+    
+    comp_state_code = company_profile.state_code if company_profile else '29'
+    # Fallback to model POS if set, else Location state
+    pos_code = invoice.place_of_supply if invoice.place_of_supply else (invoice.location.state_code if invoice.location else '29')
+    
+    is_igst = (pos_code != comp_state_code)
+    
+    # Re-sum taxable for display if needed, or rely on grand total - tax? 
+    # Better to sum line items for the "Taxable Value" column/row in template.
+    taxable_val = sum(item.taxable_value for item in invoice.invoiceitem_set.all())
+
+    return render(request, 'clientdoc/invoice_print_template.html', {
+        'invoice': invoice,
+        'company': company_profile,
+        'display_invoice_number': display_invoice_number,
+        'taxable_val': taxable_val,
+        'tax_amt': (invoice.cgst_total + invoice.sgst_total + invoice.igst_total),
+        'cgst_amt': invoice.cgst_total,
+        'sgst_amt': invoice.sgst_total,
+        'igst_amt': invoice.igst_total,
+        'is_igst': is_igst,
+    })
+
+def print_dc(request, invoice_id):
+    """Renders the print-friendly Delivery Challan template."""
+    invoice = get_object_or_404(SalesInvoice, id=invoice_id)
+    # Get the associated Delivery Challan
+    dc = get_object_or_404(DeliveryChallan, invoice=invoice)
+    company_profile = OurCompanyProfile.objects.first()
+    
+    # Calculate total quantity
+    total_qty = sum(item.quantity for item in invoice.invoiceitem_set.all())
+    display_invoice_number = invoice.tally_invoice_number if invoice.tally_invoice_number else invoice.app_invoice_number
+    
+    return render(request, 'clientdoc/dc_print_template.html', {
+        'invoice': invoice,
+        'dc': dc,
+        'company': company_profile,
+        'total_qty': total_qty,
+        'display_invoice_number': display_invoice_number
+    })
+
+def print_transport(request, invoice_id):
+    """Renders the print-friendly Transport Charges template."""
+    invoice = get_object_or_404(SalesInvoice, id=invoice_id)
+    # Get the associated Transport Charges
+    transport = get_object_or_404(TransportCharges, invoice=invoice)
+    company_profile = OurCompanyProfile.objects.first()
+    
+    display_invoice_number = invoice.tally_invoice_number if invoice.tally_invoice_number else invoice.app_invoice_number
+    
+    return render(request, 'clientdoc/transport_print_template.html', {
+        'invoice': invoice,
+        'transport': transport,
+        'company': company_profile,
+        'display_invoice_number': display_invoice_number
+    })
+def project_guide(request):
+    """Serves the Project Guide PDF."""
+    import os
+    from django.conf import settings
+    from django.http import HttpResponse, Http404
+
+    file_path = os.path.join(settings.BASE_DIR, 'Project guide', 'Project Guide.pdf')
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as pdf:
+            response = HttpResponse(pdf.read(), content_type='application/pdf')
+            response['Content-Disposition'] = 'inline; filename="Project Guide.pdf"'
+            return response
+    else:
+        raise Http404("Project Guide not found")

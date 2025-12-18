@@ -1,0 +1,10 @@
+<div class="image-page">
+    {% for image in confirmation.packedimage_set.all %}
+        <div class="image-container">
+            <img src="{{ image.image.url }}" alt="Packed Goods Image" class="packed-image">
+            <p class="image-caption">Image File: {{ image.image.name|cut:'packed_images/' }}</p>
+            <p class="image-caption">Notes: {{ image.notes|default:"No notes provided" }}</p>
+        </div>
+        <div class="page-break"></div>
+    {% endfor %}
+</div>
