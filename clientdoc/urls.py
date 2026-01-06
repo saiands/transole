@@ -14,6 +14,8 @@ urlpatterns = [
     path('delivery-challans/', views.dc_list, name='dc_list'),
     path('transport-charges/', views.transport_list, name='transport_list'),
     path('confirmation-docs/', views.confirmation_list, name='confirmation_list'),
+    path('bulk-upload/', views.bulk_upload_page, name='bulk_upload_page'),
+    path('bulk-upload/sample/', views.download_sample_excel, name='download_sample_excel'),
     
     path('locations/<int:pk>/edit/', views.edit_location, name='edit_location'),
     path('locations/<int:pk>/', views.store_location_detail, name='store_location_detail'),

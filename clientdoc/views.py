@@ -8,7 +8,9 @@ from django.db import transaction
 from django.core.paginator import Paginator
 from django.conf import settings
 from django.urls import reverse
-from .models import SalesInvoice, InvoiceItem, Item, StoreLocation, DeliveryChallan, TransportCharges, ConfirmationDocument, PackedImage, OurCompanyProfile, ActivityLog, Buyer
+from .models import SalesInvoice, InvoiceItem, Item, StoreLocation, DeliveryChallan, TransportCharges, ConfirmationDocument, PackedImage, OurCompanyProfile, ActivityLog, Buyer, BulkInvoiceUpload, ItemCategory
+import openpyxl
+from openpyxl.worksheet.datavalidation import DataValidation
 from .forms import InvoiceForm, DeliveryChallanForm, TransportChargesForm, ConfirmationDocumentForm, PackedImageFormSet, ItemForm, StoreLocationForm, BuyerForm, InvoiceItemFormSet
 import json
 from .pdf_generator import generate_invoice_pdf, generate_dc_pdf, generate_transport_pdf
@@ -798,9 +800,483 @@ def finalize_invoice_pdf(request, invoice_id):
             return redirect('clientdoc:confirmation_list')
 
         except Exception as e:
-            logger.error(f"Merge error: {e}")
-            messages.error(request, f"Error generating PDF: {e}")
-            return redirect('clientdoc:create_confirmation', invoice_id=invoice.id)
+            logger.error(f"Error finalizing PDF: {e}")
+            messages.error(request, f"Error finalizing PDF: {e}")
+            return redirect('clientdoc:create_confirmation', invoice_id=invoice_id)
+            
+    return redirect('clientdoc:create_confirmation', invoice_id=invoice_id)
+
+# --- BULK UPLOAD VIEWS ---
+
+def bulk_upload_page(request):
+    """Page to upload excel and view history."""
+    uploads = BulkInvoiceUpload.objects.order_by('-uploaded_at')
+    
+    if request.method == 'POST' and request.FILES.get('file'):
+        file = request.FILES['file']
+        upload_type = request.POST.get('upload_type', 'invoice') # Default to invoice
+        
+        if not file.name.endswith(('.xlsx', '.xls')):
+            messages.error(request, 'Please upload a valid Excel file.')
+            return redirect('clientdoc:bulk_upload_page')
+            
+        upload_record = BulkInvoiceUpload.objects.create(file=file)
+        upload_record.log = f"Type: {upload_type.title()}\n"
+        upload_record.save()
+        
+        try:
+            if upload_type == 'buyer':
+                process_buyer_upload(upload_record)
+            elif upload_type == 'item':
+                process_item_upload(upload_record)
+            elif upload_type == 'location':
+                process_location_upload(upload_record)
+            else:
+                process_invoice_upload(upload_record)
+                
+            messages.success(request, f'{upload_type.title()} file uploaded and processed successfully.')
+        except Exception as e:
+            import traceback
+            error_msg = f"Error processing file: {str(e)}\n{traceback.format_exc()}"
+            upload_record.status = 'Failed'
+            upload_record.log += error_msg
+            upload_record.save()
+            messages.error(request, 'Error processing file. Check logs.')
+            
+        return redirect('clientdoc:bulk_upload_page')
+        
+    return render(request, 'clientdoc/bulk_upload.html', {
+        'uploads': uploads,
+        'title': 'Bulk Data Upload'
+    })
+
+def download_sample_excel(request):
+    """Generates a sample excel file based on type with formatting, optionally with data."""
+    import datetime
+    from openpyxl.styles import Font, PatternFill, Alignment
+    
+    upload_type = request.GET.get('type', 'invoice')
+    do_export = request.GET.get('export') == 'true'
+    
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"{upload_type.title()} {'Data' if do_export else 'Template'}"
+    
+    # Define Headers based on Type
+    if upload_type == 'buyer':
+        headers = ["Buyer Name*", "Address", "GSTIN", "State", "Phone", "Email"]
+        widths = [30, 40, 20, 20, 20, 30]
+        
+    elif upload_type == 'item':
+        headers = ["Item Name*", "Category", "Article/SKU", "Description", "Price*", "GST Rate (0.18)*", "HSN Code", "Unit (Nos)"]
+        widths = [30, 20, 20, 40, 15, 15, 15, 15]
+        
+    elif upload_type == 'location':
+        headers = ["Location Name*", "Site Code", "Address", "City", "State", "GSTIN", "Priority"]
+        widths = [30, 15, 40, 20, 20, 20, 15]
+        
+    else: # Invoice
+        headers = [
+            "Buyer Name", "Location Name", "Item Name", "Quantity", "Generate Invoice (Yes/No)",
+            "Generate PDF (Yes/No)", "App Invoice No. (For Update)",
+            "Tally Invoice No.", 
+            "Buyer's Order No.", "Buyer's Order Date (YYYY-MM-DD)", 
+            "Dispatch Doc No.", "Dispatched Through", "Destination", 
+            "Delivery Note", "Delivery Note Date (YYYY-MM-DD)", 
+            "Mode/Terms of Payment", "Reference No. & Date", "Other References", 
+            "Terms of Delivery", "Remarks",
+            "DC Notes", "Transport Charges", "Transport Description"
+        ]
+        widths = [25, 25, 25, 10, 15, 15, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 20, 25, 30, 30, 15, 30]
+
+    ws.append(headers)
+    
+    # Styles
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="808080", end_color="808080", fill_type="solid") # Grey
+    blue_fill = PatternFill(start_color="0070C0", end_color="0070C0", fill_type="solid") # Blue
+    
+    for cell in ws[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+        
+    # Blue First Column Header
+    ws['A1'].fill = blue_fill
+    
+    # Set Widths
+    for i, width in enumerate(widths, 1):
+        col_letter = openpyxl.utils.get_column_letter(i)
+        ws.column_dimensions[col_letter].width = width
+
+    # ---- EXPORT DATA LOGIC ----
+    if do_export:
+        if upload_type == 'buyer':
+            for obj in Buyer.objects.all():
+                ws.append([
+                    obj.name, obj.address, obj.gstin, obj.state, obj.phone, obj.email
+                ])
+        elif upload_type == 'item':
+            for obj in Item.objects.select_related('category').all():
+                ws.append([
+                    obj.name, 
+                    obj.category.name if obj.category else "", 
+                    obj.article_code, 
+                    obj.description, 
+                    obj.price, 
+                    float(obj.gst_rate) if obj.gst_rate else 0.00,
+                    obj.hsn_code, 
+                    obj.unit
+                ])
+        elif upload_type == 'location':
+            for obj in StoreLocation.objects.all():
+                ws.append([
+                    obj.name, obj.site_code, obj.address, obj.city, obj.state, obj.gstin, obj.priority
+                ])
+    
+    # Invoice Specific Logic (Dropdowns etc - Only for Templates/Invoice)
+    if upload_type == 'invoice':
+        # Add Data and Validations
+        data_ws = wb.create_sheet("Reference Data")
+        data_ws.sheet_state = 'hidden' 
+        
+        buyers = list(Buyer.objects.values_list('name', flat=True))
+        locations = list(StoreLocation.objects.values_list('name', flat=True))
+        items = list(Item.objects.values_list('name', flat=True))
+        
+        for i, b in enumerate(buyers, 1): data_ws.cell(row=i, column=1, value=b)
+        for i, l in enumerate(locations, 1): data_ws.cell(row=i, column=2, value=l)
+        for i, it in enumerate(items, 1): data_ws.cell(row=i, column=3, value=it)
+
+        def add_val(col, valid_range):
+             dv = DataValidation(type="list", formula1=valid_range, allow_blank=True)
+             ws.add_data_validation(dv)
+             dv.add(f"{col}2:{col}500")
+
+        if buyers: add_val('A', f"'Reference Data'!$A$1:$A${len(buyers)}")
+        if locations: add_val('B', f"'Reference Data'!$B$1:$B${len(locations)}")
+        if items: add_val('C', f"'Reference Data'!$C$1:$C${len(items)}")
+        
+        dv_yn = DataValidation(type="list", formula1='"Yes,No"', allow_blank=False)
+        ws.add_data_validation(dv_yn)
+        dv_yn.add("E2:E500")
+        ws.add_data_validation(dv_yn) 
+        dv_yn.add("F2:F500")
+        
+        # Defaults
+        ws['E2'] = "Yes"
+        ws['F2'] = "Yes" # Default PDF to Yes as requested
+        ws['P2'] = "30 Days"
+        ws['R2'] = "EMAIL Approval"
+    
+    # Timestamped Filename
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M")
+    mode = "Export" if do_export else "Template"
+    filename = f"Bulk_{upload_type.title()}_{mode}_{timestamp}.xlsx"
+
+    response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    response['Content-Disposition'] = f'attachment; filename={filename}'
+    wb.save(response)
+    return response
+
+# --- PROCESSORS ---
+def process_buyer_upload(record):
+    ws = openpyxl.load_workbook(record.file.path, data_only=True).active
+    log = []
+    for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        if not row or not row[0]: continue
+        name = str(row[0]).strip()
+        defaults = {
+            'address': row[1] or "",
+            'gstin': row[2] or "",
+            'state': row[3] or "Karnataka",
+            'phone': row[4] or "",
+            'email': row[5] or ""
+        }
+        obj, created = Buyer.objects.update_or_create(name=name, defaults=defaults)
+        log.append(f"Row {idx}: {'Created' if created else 'Updated'} Buyer '{name}'")
+    
+    record.log += "\n".join(log)
+    record.status = 'Processed'
+    record.save()
+
+def process_item_upload(record):
+    ws = openpyxl.load_workbook(record.file.path, data_only=True).active
+    log = []
+    from decimal import Decimal
+    for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        if not row or not row[0]: continue
+        name = str(row[0]).strip()
+        
+        # Category Logic
+        cat_name = row[1]
+        category = None
+        if cat_name:
+            category, _ = ItemCategory.objects.get_or_create(name=str(cat_name).strip())
+            
+        price = 0.00
+        try: price = float(row[4]) if row[4] else 0.00
+        except: pass
+        
+        gst = 0.18
+        try: gst = float(row[5]) if row[5] else 0.18
+        except: pass
+
+        defaults = {
+            'category': category,
+            'article_code': row[2] or "",
+            'description': row[3] or "",
+            'price': Decimal(price),
+            'gst_rate': Decimal(gst),
+            'hsn_code': row[6] or "844311",
+            'unit': row[7] or "Nos"
+        }
+        obj, created = Item.objects.update_or_create(name=name, defaults=defaults)
+        log.append(f"Row {idx}: {'Created' if created else 'Updated'} Item '{name}'")
+        
+    record.log += "\n".join(log)
+    record.status = 'Processed'
+    record.save()
+
+def process_location_upload(record):
+    ws = openpyxl.load_workbook(record.file.path, data_only=True).active
+    log = []
+    for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
+        if not row or not row[0]: continue
+        name = str(row[0]).strip()
+        defaults = {
+            'site_code': row[1] or "",
+            'address': row[2] or "",
+            'city': row[3] or "",
+            'state': row[4] or "Karnataka",
+            'gstin': row[5] or "",
+            'priority': row[6] or ""
+        }
+        obj, created = StoreLocation.objects.update_or_create(name=name, defaults=defaults)
+        log.append(f"Row {idx}: {'Created' if created else 'Updated'} Location '{name}'")
+        
+    record.log += "\n".join(log)
+    record.status = 'Processed'
+    record.save()
+
+def process_invoice_upload(upload_record):
+    """Parses Excel with PDF generation and Update support."""
+    file_path = upload_record.file.path
+    wb = openpyxl.load_workbook(file_path, data_only=True)
+    ws = wb.active
+    
+    log = []
+    created_count = 0
+    updated_count = 0
+    error_count = 0
+    
+    from datetime import datetime
+    
+    def parse_date(date_val):
+        if not date_val: return None
+        if isinstance(date_val, datetime): return date_val
+        try:
+            return datetime.strptime(str(date_val).strip(), '%Y-%m-%d')
+        except ValueError:
+            return None 
+
+    for index, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if not row or not any(row): continue
+        
+        def get_col(idx):
+            return row[idx] if idx < len(row) else None
+            
+        buyer_name = get_col(0)
+        location_name = get_col(1)
+        item_name = get_col(2)
+        qty = get_col(3)
+        gen_invoice = get_col(4)
+        
+        # New Cols
+        gen_pdf = get_col(5)
+        app_inv_no = get_col(6)
+        
+        # Header Fields (Shifted +2)
+        tally_no = get_col(7)
+        buyer_ord_no = get_col(8)
+        buyer_ord_date = parse_date(get_col(9))
+        disp_doc_no = get_col(10)
+        disp_through = get_col(11)
+        dest = get_col(12)
+        del_note = get_col(13)
+        del_note_date = parse_date(get_col(14))
+        pay_terms = get_col(15) or "30 Days"
+        ref_no = get_col(16)
+        other_ref = get_col(17) or "EMAIL Approval"
+        terms_del = get_col(18)
+        remark = get_col(19)
+        
+        # DC & Transport
+        dc_notes = get_col(20)
+        trans_charges = get_col(21)
+        trans_desc = get_col(22)
+
+        # 1. Check Gen Invoice Flag
+        if not gen_invoice or str(gen_invoice).strip().lower() != 'yes':
+            log.append(f"Row {index}: Skipped (Generate = No)")
+            continue
+            
+        # 2. Basic Validation
+        if not (location_name and item_name and qty):
+            log.append(f"Row {index}: Failed - Missing Location, Item or Qty")
+            error_count += 1
+            continue
+            
+        try:
+            with transaction.atomic():
+                # 3. Resolve FKs
+                loc_obj = StoreLocation.objects.filter(name__iexact=str(location_name).strip()).first()
+                if not loc_obj:
+                    log.append(f"Row {index}: Failed - Location '{location_name}' not found")
+                    error_count += 1
+                    continue
+                
+                buyer_obj = None
+                if buyer_name:
+                    buyer_obj = Buyer.objects.filter(name__iexact=str(buyer_name).strip()).first()
+                
+                item_obj = Item.objects.filter(name__iexact=str(item_name).strip()).first()
+                if not item_obj:
+                     log.append(f"Row {index}: Failed - Item '{item_name}' not found")
+                     error_count += 1
+                     continue
+
+                # 4. DETERMINE UPDATE OR CREATE
+                invoice = None
+                is_update = False
+                
+                if app_inv_no and str(app_inv_no).strip():
+                    valid_id = str(app_inv_no).strip()
+                    invoice = SalesInvoice.objects.filter(app_invoice_number__iexact=valid_id).first()
+                    if invoice:
+                        is_update = True
+                
+                # Header Data Dict
+                header_data = {
+                    'buyer': buyer_obj,
+                    'location': loc_obj,
+                    'tally_invoice_number': tally_no,
+                    'buyers_order_no': buyer_ord_no,
+                    'buyers_order_date': buyer_ord_date or datetime.now(),
+                    'dispatch_doc_no': disp_doc_no,
+                    'dispatched_through': disp_through,
+                    'destination': dest,
+                    'delivery_note': del_note,
+                    'delivery_note_date': del_note_date or datetime.now(),
+                    'mode_terms_payment': pay_terms,
+                    'reference_no_date': ref_no,
+                    'other_references': other_ref,
+                    'terms_of_delivery': terms_del,
+                    'remark': remark,
+                }
+
+                if is_update and invoice:
+                    # Update fields
+                    for key, val in header_data.items():
+                        if val is not None: # Only update if value provided? Or overwrite? 
+                            # Overwrite is safer for sync
+                            setattr(invoice, key, val)
+                    invoice.save()
+                    log_entry_prefix = f"Row {index}: Updated Invoice {invoice.app_invoice_number}"
+                    updated_count += 1
+                else:
+                    # Create New
+                    header_data['date'] = datetime.now()
+                    header_data['status'] = 'DRF'
+                    invoice = SalesInvoice.objects.create(**header_data)
+                    log_entry_prefix = f"Row {index}: Created Invoice #{invoice.id}"
+                    created_count += 1
+                
+                # 5. Add Item (Append)
+                InvoiceItem.objects.create(
+                    invoice=invoice,
+                    item=item_obj,
+                    quantity=int(qty),
+                    price=item_obj.price,
+                )
+                
+                # 6. Auto-Create/Update DC
+                if dc_notes:
+                    dc, _ = DeliveryChallan.objects.get_or_create(invoice=invoice)
+                    dc.notes = dc_notes
+                    dc.save()
+                    if invoice.status == 'DRF': invoice.status = 'DC'
+                
+                # 7. Auto-Create/Update Transport
+                if trans_charges:
+                    try:
+                        amt = float(trans_charges)
+                        trp, _ = TransportCharges.objects.get_or_create(invoice=invoice)
+                        trp.charges = amt
+                        trp.description = trans_desc
+                        trp.save()
+                        if invoice.status in ['DRF', 'DC']: invoice.status = 'TRP'
+                    except ValueError:
+                        log.append(f"{log_entry_prefix} - Warning: Invalid Transport Charge")
+
+                invoice.save()
+                invoice.calculate_total()
+                
+                # 8. GENERATE PDF?
+                pdf_status = ""
+                if gen_pdf and str(gen_pdf).strip().lower() == 'yes':
+                    # Only gen if status allows (must have DC/TRP technically, but we can force)
+                    try:
+                        # Ensure confirmation doc exists
+                        conf, _ = ConfirmationDocument.objects.get_or_create(invoice=invoice)
+                        company_profile = OurCompanyProfile.objects.first()
+                        
+                        merger = PdfMerger()
+                        
+                        # 1. Invoice
+                        invoice.calculate_total() 
+                        merger.append(generate_invoice_pdf(invoice, company_profile))
+                        
+                        # 2. DC
+                        if hasattr(invoice, 'deliverychallan'):
+                            merger.append(generate_dc_pdf(invoice, invoice.deliverychallan, company_profile))
+                            
+                        # 3. Transport
+                        if hasattr(invoice, 'transportcharges'):
+                            merger.append(generate_transport_pdf(invoice, invoice.transportcharges, company_profile))
+                            
+                        # Output
+                        output = BytesIO()
+                        merger.write(output)
+                        merger.close()
+                        output.seek(0)
+                        
+                        # Save
+                        filename_suffix = invoice.tally_invoice_number or invoice.app_invoice_number or str(invoice.id)
+                        filename = f"confirmation_invoice_{filename_suffix}.pdf"
+                        
+                        # Django File Save
+                        from django.core.files.base import ContentFile
+                        conf.combined_pdf.save(filename, ContentFile(output.getvalue()), save=True)
+                        
+                        invoice.status = 'FIN'
+                        invoice.save()
+                        pdf_status = " + PDF Generated"
+                        
+                    except Exception as pdf_err:
+                        pdf_status = f" + PDF Failed: {str(pdf_err)}"
+                        logger.error(f"Bulk PDF Error: {pdf_err}")
+
+                log.append(f"{log_entry_prefix}{pdf_status}")
+
+        except Exception as e:
+            log.append(f"Row {index}: Error - {str(e)}")
+            error_count += 1
+            
+    upload_record.log = "\\n".join(log)
+    upload_record.status = 'Processed'
+    upload_record.save()
+
     
     return redirect('clientdoc:dashboard')
 

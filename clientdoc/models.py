@@ -448,3 +448,13 @@ class PackedImage(models.Model):
     def __str__(self):
         invoice_id = self.confirmation.invoice.id if self.confirmation and self.confirmation.invoice else "N/A"
         return f"Image for Confirmation {invoice_id}"
+
+class BulkInvoiceUpload(models.Model):
+    """Tracks bulk excel uploads for invoice generation."""
+    file = models.FileField(upload_to='bulk_uploads/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    status = models.CharField(max_length=20, default='Pending', choices=[('Pending', 'Pending'), ('Processed', 'Processed'), ('Failed', 'Failed')])
+    log = models.TextField(blank=True, null=True, help_text="Log of success/errors during processing")
+
+    def __str__(self):
+        return f"Upload {self.id} at {self.uploaded_at}"

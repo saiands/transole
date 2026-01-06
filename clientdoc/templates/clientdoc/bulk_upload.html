@@ -1,0 +1,135 @@
+{% extends 'clientdoc/base.html' %}
+{% load crispy_forms_tags %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2><i class="fas fa-file-excel me-2"></i>Bulk Invoice Upload</h2>
+        <p class="text-muted">Upload an Excel file to automatically generate multiple invoices at once.
+            Only rows with "Generate Invoice" set to "Yes" will be processed.</p>
+    </div>
+
+    <div class="col-md-5 text-end">
+        <a href="{% url 'clientdoc:download_sample_excel' %}?type=invoice&export=true" id="exportDataBtn"
+            class="btn btn-primary me-2">
+            <i class="fas fa-file-export me-2"></i>Export Data
+        </a>
+        <a href="{% url 'clientdoc:download_sample_excel' %}?type=invoice" id="downloadSampleBtn"
+            class="btn btn-outline-success">
+            <i class="fas fa-download me-2"></i>Download Sample Template
+        </a>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-light">
+        <h5 class="mb-0">New Upload</h5>
+    </div>
+    <div class="card-body">
+        <form method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="row align-items-end g-3">
+                <div class="col-md-4">
+                    <label for="id_type" class="form-label">Data Type</label>
+                    <select name="upload_type" id="id_type" class="form-select" onchange="updateDownloadLink()">
+                        <option value="invoice" selected>Sales Invoices</option>
+                        <option value="buyer">Buyers List</option>
+                        <option value="item">Items Inventory</option>
+                        <option value="location">Client Locations</option>
+                    </select>
+                </div>
+                <div class="col-md-5">
+                    <label for="id_file" class="form-label">Select Excel File (.xlsx)</label>
+                    <input type="file" name="file" class="form-control" id="id_file" accept=".xlsx, .xls" required>
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-upload me-2"></i>Upload & Process
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function updateDownloadLink() {
+        const type = document.getElementById('id_type').value;
+        const btn = document.getElementById('downloadSampleBtn');
+        const exportBtn = document.getElementById('exportDataBtn');
+        const baseUrl = "{% url 'clientdoc:download_sample_excel' %}";
+
+        btn.href = `${baseUrl}?type=${type}`;
+        btn.innerHTML = `<i class="fas fa-download me-2"></i>Download ${type.charAt(0).toUpperCase() + type.slice(1)} Template`;
+
+        exportBtn.href = `${baseUrl}?type=${type}&export=true`;
+        exportBtn.style.display = (type === 'invoice') ? 'none' : 'inline-block';
+    }
+
+    // Init
+    updateDownloadLink();
+</script>
+
+
+<div class="card shadow-sm">
+    <div class="card-header bg-light">
+        <h5 class="mb-0">Upload History</h5>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Uploaded At</th>
+                        <th>File Name</th>
+                        <th>Status</th>
+                        <th>Log/Result</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for upload in uploads %}
+                    <tr>
+                        <td>#{{ upload.id }}</td>
+                        <td>{{ upload.uploaded_at|date:"d M Y, h:i A" }}</td>
+                        <td>
+                            <a href="{{ upload.file.url }}" class="text-decoration-none">
+                                <i class="fas fa-file-excel text-success me-1"></i> {{
+                                upload.file.name|cut:"bulk_uploads/" }}
+                            </a>
+                        </td>
+                        <td>
+                            {% if upload.status == 'Processed' %}
+                            <span class="badge bg-success">Processed</span>
+                            {% elif upload.status == 'Failed' %}
+                            <span class="badge bg-danger">Failed</span>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">{{ upload.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if upload.log %}
+                            <button type="button" class="btn btn-sm btn-link text-muted" data-bs-toggle="collapse"
+                                data-bs-target="#log{{ upload.id }}">
+                                View Log <i class="fas fa-chevron-down"></i>
+                            </button>
+                            <div class="collapse mt-2" id="log{{ upload.id }}">
+                                <pre class="small bg-light p-2 border rounded"
+                                    style="max-height: 150px; overflow-y: auto;">{{ upload.log|linebreaksbr }}</pre>
+                            </div>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center py-4 text-muted">No uploads found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

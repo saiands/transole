@@ -108,9 +108,9 @@
                 <ul class="navbar-nav ms-auto align-items-center">
                     <li class="nav-item me-2"><a class="nav-link" href="{% url 'clientdoc:dashboard' %}"><i
                                 class="fas fa-chart-pie me-1"></i> Dashboard</a></li>
-                    
-                    <li class="nav-item me-2"><a class="nav-link" href="{% url 'clientdoc:project_guide' %}" target="_blank"><i
-                                class="fas fa-book me-1"></i> Project Guide</a></li>
+
+                    <li class="nav-item me-2"><a class="nav-link" href="{% url 'clientdoc:project_guide' %}"
+                            target="_blank"><i class="fas fa-book me-1"></i> Project Guide</a></li>
 
                     <li class="nav-item dropdown me-2">
                         <a class="nav-link dropdown-toggle" href="#" id="docsDrop" role="button"
@@ -161,6 +161,11 @@
                                         class="fas fa-box me-2 text-warning"></i>New Item</a></li>
                             <li><a class="dropdown-item" href="{% url 'clientdoc:create_location' %}"><i
                                         class="fas fa-map-marker-alt me-2 text-danger"></i>New Location</a></li>
+                            <li>
+                                <hr class="dropdown-divider">
+                            </li>
+                            <li><a class="dropdown-item" href="{% url 'clientdoc:bulk_upload_page' %}"><i
+                                        class="fas fa-upload me-2 text-info"></i>Bulk Invoice Upload</a></li>
                         </ul>
                     </li>
                 </ul>
