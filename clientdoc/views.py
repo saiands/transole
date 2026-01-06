@@ -447,28 +447,30 @@ def create_invoice(request):
                 invoice.save()
                 
                 # Bind formset to new invoice
-                formset = InvoiceItemFormSet(request.POST, instance=invoice)
+                formset = InvoiceItemFormSet(request.POST, instance=invoice, prefix='invoiceitem_set')
                 
+                print(f"DEBUG: TOTAL_FORMS: {request.POST.get('invoiceitem_set-TOTAL_FORMS')}")
+                if not formset.is_valid():
+                    print(f"DEBUG: Formset Errors: {formset.errors}")
+                    print(f"DEBUG: NonForm Errors: {formset.non_form_errors()}")
+
+                print(f"DEBUG: TOTAL_FORMS: {request.POST.get('invoiceitem_set-TOTAL_FORMS')}")
                 if formset.is_valid():
-                    instances = formset.save(commit=False)
-                    for instance in instances:
-                        if instance.item_id: # Only save if item is selected
-                            instance.invoice = invoice
-                            instance.save()
+                    # Standard save handles foreign keys because instance=invoice is passed
+                    formset.save()
                     
-                    # Also handle deletions if any (though create mode usually doesn't have them)
-                    for obj in formset.deleted_objects:
-                        obj.delete()
+                    invoice.refresh_from_db()
                     invoice.calculate_total()
-                    log_activity("Create Invoice", f"Created Invoice {invoice.id}")
-                    messages.success(request, f'Invoice #{invoice.id} created successfully! Now input Tally details.')
+                    
+                    log_activity("Create Invoice", f"Created Invoice {invoice.id} with {invoice.invoiceitem_set.count()} items")
+                    messages.success(request, f'Invoice #{invoice.id} created successfully!')
                     return redirect('clientdoc:edit_invoice', invoice_id=invoice.id)
                 else:
                     # Rollback if items are invalid
                     transaction.set_rollback(True)
                     # Show errors
                     if formset.non_form_errors():
-                        messages.error(request, formset.non_form_errors())
+                        messages.error(request, f"Formset Error: {formset.non_form_errors()}")
                     for form in formset:
                         for field, errors in form.errors.items():
                              for error in errors:
@@ -483,7 +485,8 @@ def create_invoice(request):
         # GET request - Initialize empty formset so we have management form
         # We pass instance=None or a dummy unsaved instance? 
         # inlineformset factory expects instance. SalesInvoice() is fine.
-        formset = InvoiceItemFormSet(instance=SalesInvoice())
+        formset = InvoiceItemFormSet(instance=SalesInvoice(), prefix='invoiceitem_set')
+        formset.extra = 0
 
     return render(request, 'clientdoc/invoice_form.html', {
         'locations': locations,
@@ -497,14 +500,26 @@ def create_invoice(request):
 # --- 3. WORKFLOW STEP 2: EDIT INVOICE (TALLY DETAILS) ---
 def edit_invoice(request, invoice_id):
     invoice = get_object_or_404(SalesInvoice, id=invoice_id)
+    items = Item.objects.all() 
     
     if request.method == 'POST':
         form = InvoiceForm(request.POST, instance=invoice) 
-        if form.is_valid():
+        formset = InvoiceItemFormSet(request.POST, instance=invoice, prefix='invoiceitem_set')
+        
+        if form.is_valid() and formset.is_valid():
             form.save()
-            log_activity("Edit Invoice", f"Updated Invoice {invoice.tally_invoice_number or invoice.id} details")
             
-            # FIX 2: Redirect to the Invoice List after edit
+            instances = formset.save(commit=False)
+            for instance in instances:
+                if instance.item_id:
+                    instance.invoice = invoice
+                    instance.save()
+            
+            for obj in formset.deleted_objects:
+                obj.delete()
+                
+            invoice.calculate_total()
+            log_activity("Edit Invoice", f"Updated Invoice {invoice.tally_invoice_number or invoice.id} details")
             messages.success(request, f'Invoice details updated.')
             
             if request.POST.get('action') == 'save_continue':
@@ -513,13 +528,22 @@ def edit_invoice(request, invoice_id):
                 return redirect('clientdoc:invoice_list')
             
             return redirect('clientdoc:edit_invoice', invoice_id=invoice.id) 
+        else:
+             if not form.is_valid():
+                 messages.error(request, f"Header Errors: {form.errors}")
+             if not formset.is_valid():
+                 messages.error(request, f"Item Errors: {formset.errors}")
     else:
         form = InvoiceForm(instance=invoice)
-        
+        formset = InvoiceItemFormSet(instance=invoice, prefix='invoiceitem_set')
+    
+    invoice.refresh_from_db()
     next_url = reverse('clientdoc:edit_dc', kwargs={'invoice_id': invoice.id})
 
     return render(request, 'clientdoc/edit_tally_details.html', {
         'form': form,
+        'formset': formset,
+        'items': items,
         'invoice': invoice, # Fixed
         'title': f'Edit Tally Details for Invoice #{invoice.id}',
         'next_url': next_url, 

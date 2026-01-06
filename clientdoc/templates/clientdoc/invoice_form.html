@@ -125,7 +125,6 @@
                                 </thead>
                                 <tbody class="border-top-0">
                                     <!-- Rows added via JS -->
-                                    {{ formset.management_form }}
                                 </tbody>
                                 <tfoot class="table-group-divider bg-light fw-bold">
                                     <tr>
@@ -215,9 +214,10 @@
             // In forms.py: InvoiceItemFormSet = inlineformset_factory(SalesInvoice, InvoiceItem, ...)
             // The default prefix for inlineformset_factory is usually related to the related model name 'invoiceitem_set'.
             // We'll detect the prefix from the management form ID itself.
-            let formPrefix = 'invoiceitem_set';
-            if (totalFormsInput.id.startsWith('id_form-')) formPrefix = 'form';
-            else if (totalFormsInput.id.startsWith('id_invoiceitem_set-')) formPrefix = 'invoiceitem_set';
+            const formPrefix = 'invoiceitem_set';
+
+            // if (totalFormsInput.id.startsWith('id_form-')) formPrefix = 'form';
+            // else if (totalFormsInput.id.startsWith('id_invoiceitem_set-')) formPrefix = 'invoiceitem_set';
 
             const currentPrefix = `${formPrefix}-${formIdx}`;
 

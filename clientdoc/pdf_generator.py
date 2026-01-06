@@ -1,9 +1,17 @@
-from io import BytesIO
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT, TA_LEFT
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+import os
+from io import BytesIO
+
+# Register Font for INR Symbol if available
+# User requested fallback to Rs. if issues persist.
+INR_SYMBOL = 'Rs.'
 
 def clean(val): return str(val) if val else "-"
 def clean_date(d): return d.strftime('%d-%b-%y') if d else ""
@@ -202,9 +210,9 @@ def generate_invoice_pdf(invoice, company_input):
             Paragraph(f"<b>{item.item.name}</b><br/>{item.item.description or ''}", style_normal),
             item.item.hsn_sac,
             f"{item.quantity} Nos",
-            f"{item.price}", # Snapshot price
-            "Nos",
-            f"{item.quantity * item.price}" # Snapshot price
+            f"Rs. {item.price}", # Snapshot price
+            item.item.unit or "Nos", # Use actual unit from Item master
+            f"Rs. {item.quantity * item.price}" # Snapshot price
         ])
     
     taxable_value = sum(i.quantity * i.price for i in invoice.invoiceitem_set.all())
@@ -222,13 +230,13 @@ def generate_invoice_pdf(invoice, company_input):
     
     # We display the TOTAL CGST/SGST in the item table now, instead of per rate, 
     # because the detailed breakdown is in the Tax Analysis Matrix below.
-    item_data.append(['', Paragraph(f"<b>Output CGST (Total)</b>", style_normal), '', '', '', '', f"{total_cgst:.2f}"])
-    item_data.append(['', Paragraph(f"<b>Output SGST (Total)</b>", style_normal), '', '', '', '', f"{total_sgst:.2f}"])
+    item_data.append(['', Paragraph(f"<b>Output CGST (Total)</b>", style_normal), '', '', '', '', f"Rs. {total_cgst:.2f}"])
+    item_data.append(['', Paragraph(f"<b>Output SGST (Total)</b>", style_normal), '', '', '', '', f"Rs. {total_sgst:.2f}"])
     item_data.append(['', Paragraph(f"<br/><b>Bill Details:</b><br/>{bill_details}", style_small), '', '', '', '', ''])
 
-    item_data.append(['', 'Total', '', f"{total_qty} Nos", '', '', f"Rs. {invoice.total}"])
+    item_data.append(['', 'Total', '', f"{total_qty} Nos", '', '', f"{INR_SYMBOL} {invoice.total}"])
     
-    col_widths = [10*mm, 85*mm, 20*mm, 25*mm, 20*mm, 10*mm, 25*mm]
+    col_widths = [10*mm, 78*mm, 20*mm, 25*mm, 20*mm, 10*mm, 25*mm]
     
     t_items = Table(item_data, colWidths=col_widths)
     t_items.setStyle(TableStyle([
@@ -273,11 +281,11 @@ def generate_invoice_pdf(invoice, company_input):
         total_tax_amt += tot_t
         
         tax_data.append([
-            hsn, f"{val:.2f}", f"{c_rate*100:.1f}%", f"{c_amt:.2f}", f"{s_rate*100:.1f}%", f"{s_amt:.2f}", f"{tot_t:.2f}"
+            hsn, f"Rs. {val:.2f}", f"{c_rate*100:.1f}%", f"Rs. {c_amt:.2f}", f"{s_rate*100:.1f}%", f"Rs. {s_amt:.2f}", f"Rs. {tot_t:.2f}"
         ])
     
     tax_data.append([
-        'Total', f"{taxable_value:.2f}", '', f"{total_cgst:.2f}", '', f"{total_sgst:.2f}", f"{total_tax_amt:.2f}"
+        'Total', f"Rs. {taxable_value:.2f}", '', f"Rs. {total_cgst:.2f}", '', f"Rs. {total_sgst:.2f}", f"Rs. {total_tax_amt:.2f}"
     ])
     
     t_tax = Table(tax_data, colWidths=[25*mm, 35*mm, 15*mm, 30*mm, 15*mm, 30*mm, 40*mm])
@@ -400,15 +408,48 @@ def generate_dc_pdf(invoice, dc, company_input):
     <b>Receiver's Signature</b>
     """
     
-    auth_sign = f"""
-    <b>for {company.name}</b><br/><br/><br/><br/>
-    Authorised Signatory
-    """
+    # Signature Image logic for DC
+    signature_img = None
+    if hasattr(company, 'signature') and company.signature:
+        try:
+            img_path = company.signature.path
+            # Center the image in the signature block
+            signature_img = Image(img_path, width=40*mm, height=15*mm) 
+            signature_img.hAlign = 'CENTER'
+        except Exception:
+            pass
+
+    auth_sign_header_text = f"<b>for {company.name}</b>"
+    auth_sign_footer_text = "Authorised Signatory" # Removed <br/> to control spacing via Table
+
+    # Create a nested table for the signature block to ensure centering
+    sign_data = []
+    sign_data.append([Paragraph(auth_sign_header_text, ParagraphStyle('SignHead', parent=styles['Normal'], alignment=1))]) # Center
     
-    foot_data = [[Paragraph(footer_text, style_normal), Paragraph(auth_sign, style_normal)]]
+    if signature_img:
+        sign_data.append([signature_img])
+    else:
+        sign_data.append([Spacer(1, 15*mm)])
+        
+    sign_data.append([Paragraph(auth_sign_footer_text, ParagraphStyle('SignFoot', parent=styles['Normal'], alignment=1))]) # Center
+    
+    t_sign = Table(sign_data, colWidths=[90*mm])
+    t_sign.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+    ]))
+
+    left_cell = [Paragraph(footer_text, style_normal)]
+    
+    # Main Footer Table
+    foot_data = [[left_cell, t_sign]]
+    
     t_foot = Table(foot_data, colWidths=[95*mm, 95*mm])
     t_foot.setStyle(TableStyle([
-        ('ALIGN', (1,0), (1,0), 'RIGHT'),
+        ('ALIGN', (0,0), (0,0), 'LEFT'),  # Left cell left aligned
+        ('ALIGN', (1,0), (1,0), 'RIGHT'), # Right cell content right aligned (the table itself)
         ('VALIGN', (0,0), (-1,-1), 'TOP'),
     ]))
     elements.append(t_foot)
@@ -482,7 +523,7 @@ def generate_transport_pdf(invoice, transport, company_input):
         f"{transport.charges}"
     ])
     
-    t_data.append(['Total', '', f"{transport.charges}"])
+    t_data.append(['Total', '', f"{INR_SYMBOL} {transport.charges}"])
     
     t = Table(t_data, colWidths=[120*mm, 30*mm, 30*mm])
     t.setStyle(TableStyle([
