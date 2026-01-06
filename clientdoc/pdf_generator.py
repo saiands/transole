@@ -87,7 +87,9 @@ def create_footer_with_signature(company, notes=""):
             # ReportLab Image(path, width, height)
             signature_img = Image(img_path, width=40*mm, height=15*mm)
             signature_img.hAlign = 'RIGHT'
-        except Exception:
+        except Exception as e:
+            print(f"Error loading signature: {e}")
+            # Ensure signature_img is None or handled if error occurs
             pass
 
     auth_sig_text = "<br/>Authorised Signatory"
